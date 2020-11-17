@@ -86,6 +86,12 @@ DXC_API_IMPORT UINT __stdcall SysStringLen(BSTR pbstr) {
   return SysStringByteLen(pbstr) / 4;
 }
 
+//===-------------------------- CoTask Allocation -------------------------===//
+
+DXC_API_IMPORT LPVOID __stdcall CoTaskMemAlloc(SIZE_T cb) { return malloc(cb); }
+
+DXC_API_IMPORT void __stdcall CoTaskMemFree(LPVOID pv) { free(pv); }
+
 //===---------------------- Char converstion ------------------------------===//
 
 const char *CPToLocale(uint32_t CodePage) {
