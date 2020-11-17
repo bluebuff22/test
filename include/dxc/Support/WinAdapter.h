@@ -943,6 +943,8 @@ extern "C" DXC_API_IMPORT void __stdcall SysFreeString(BSTR bstrString);
 // Allocate string with length prefix
 extern "C" DXC_API_IMPORT BSTR __stdcall SysAllocStringLen(const OLECHAR *strIn,
                                                            UINT ui);
+extern "C" DXC_API_IMPORT UINT __stdcall SysStringByteLen(BSTR bstr);
+extern "C" DXC_API_IMPORT UINT __stdcall SysStringLen(BSTR pbstr);
 
 //===--------------------- UTF-8 Related Types ----------------------------===//
 

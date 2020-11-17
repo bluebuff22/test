@@ -75,6 +75,17 @@ DXC_API_IMPORT BSTR __stdcall SysAllocStringLen(const OLECHAR *strIn, UINT ui) {
   return strOut;
 }
 
+DXC_API_IMPORT UINT __stdcall SysStringByteLen(BSTR bstr) {
+  if (!bstr)
+    return 0;
+
+  return ((UINT *)bstr)[-1];
+}
+
+DXC_API_IMPORT UINT __stdcall SysStringLen(BSTR pbstr) {
+  return SysStringByteLen(pbstr) / 4;
+}
+
 //===---------------------- Char converstion ------------------------------===//
 
 const char *CPToLocale(uint32_t CodePage) {
