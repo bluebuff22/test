@@ -44,6 +44,10 @@ static cl::opt<bool> ListParts("listparts",
                                cl::desc("List parts in input container"),
                                cl::init(false));
 
+static cl::opt<std::string> AddRS("addrs", cl::desc("Add root signature"),
+                                      cl::value_desc("rs part"),
+                                      cl::init(""));
+
 static cl::opt<std::string>
     ExtractPart("extractpart", cl::desc("Extract one part from input container (use 'module' or 'dbgmodule' for a .ll file)"));
 
@@ -65,6 +69,7 @@ public:
   void Assemble();
   bool ExtractFile(const char *pName);
   bool ExtractPart(const char *pName);
+  bool AddPart(const char *pName, const char *pPartBinFilename);
   void ListFiles();
   void ListParts();
 };
@@ -187,6 +192,76 @@ bool DxaContext::ExtractFile(const char *pName) {
   }
 
   return printedAny;
+}
+
+bool DxaContext::AddPart(const char *pName, const char *pPartBinFilename) {
+  if (InputFilename == "-") {
+    printf(
+        "Standard input/output not supported when adding a container part.\n");
+    return false;
+  }
+  CComPtr<IDxcContainerReflection> pReflection;
+  CComPtr<IDxcBlobEncoding> pSource;
+  UINT32 partCount;
+
+  ReadFileIntoBlob(m_dxcSupport, StringRefUtf16(InputFilename), &pSource);
+  IFT(m_dxcSupport.CreateInstance(CLSID_DxcContainerReflection, &pReflection));
+  IFT(pReflection->Load(pSource));
+  IFT(pReflection->GetPartCount(&partCount));
+  IFTARG(strlen(pName) == 4);
+
+  const UINT32 matchFourCC =
+      ((UINT32)pName[0] | ((UINT32)pName[1] << 8) | ((UINT32)pName[2] << 16) |
+       ((UINT32)pName[3] << 24));
+  for (UINT32 i = 0; i < partCount; ++i) {
+    UINT32 partKind;
+    IFT(pReflection->GetPartKind(i, &partKind));
+    if (partKind == matchFourCC) {
+      printf("%s part is already exist\n", pName);
+      return false;
+    }
+  }
+
+  CComPtr<IDxcBlobEncoding> pPartSource;
+  ReadFileIntoBlob(m_dxcSupport, StringRefUtf16(pPartBinFilename),
+                   &pPartSource);
+  CComPtr<IDxcContainerBuilder> pBuilder;
+  IFT(m_dxcSupport.CreateInstance(CLSID_DxcContainerBuilder, &pBuilder));
+  IFT(pBuilder->Load(pSource));
+  IFT(pBuilder->AddPart(matchFourCC, pPartSource));
+
+  CComPtr<IDxcOperationResult> pAssembleResult;
+  IFT(pBuilder->SerializeContainer(&pAssembleResult));
+
+  CComPtr<IDxcBlobEncoding> pErrors;
+  CComPtr<IDxcBlobUtf8> pErrorsUtf8;
+  pAssembleResult->GetErrorBuffer(&pErrors);
+  if (pErrors && pErrors->GetBufferSize() > 1) {
+    IFT(pErrors->QueryInterface(IID_PPV_ARGS(&pErrorsUtf8)));
+    printf("Errors or warnings:\n%s", pErrorsUtf8->GetStringPointer());
+  }
+
+  HRESULT status;
+  IFT(pAssembleResult->GetStatus(&status));
+  if (SUCCEEDED(status)) {
+    printf("Assembly succeeded.\n");
+    CComPtr<IDxcBlob> pContainer;
+    IFT(pAssembleResult->GetResult(&pContainer));
+    if (pContainer.p != nullptr) {
+      // Infer the output filename if needed.
+      if (OutputFilename.empty()) {
+        StringRef IFN = InputFilename;
+        OutputFilename = IFN.substr(0, IFN.find_last_of('.')).str();
+        OutputFilename += ".dxo";
+      }
+
+      WriteBlobToFile(pContainer, StringRefUtf16(OutputFilename), DXC_CP_ACP);
+      printf("Output written to \"%s\"\n", OutputFilename.c_str());
+    }
+  } else {
+    printf("Adding root signature to container failed.\n");
+  }
+  return true;
 }
 
 bool DxaContext::ExtractPart(const char *pName) {
@@ -331,6 +406,11 @@ int __cdecl main(int argc, _In_reads_z_(argc) char **argv) {
     else if (!ExtractFile.empty()) {
       pStage = "Extracting files";
       if (!context.ExtractFile(ExtractFile.c_str())) {
+        return 1;
+      }
+    } else if (!AddRS.empty()) {
+      pStage = "Add root signature";
+      if (!context.AddPart("RTS0",AddRS.c_str())) {
         return 1;
       }
     }
