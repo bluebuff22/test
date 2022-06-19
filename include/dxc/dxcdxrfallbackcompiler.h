@@ -113,9 +113,9 @@ CLSID_SCOPE const GUID CLSID_DxcDxrFallbackCompiler = {
 };
 
 typedef HRESULT(__stdcall *DxcCreateDxrFallbackCompilerProc)(
-  _In_ REFCLSID   rclsid,
-  _In_ REFIID     riid,
-  _Out_ LPVOID*   ppv
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv
   );
 
 #endif

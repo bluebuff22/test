@@ -42,16 +42,16 @@ struct IMalloc;
 struct IDxcIncludeHandler;
 
 typedef HRESULT (__stdcall *DxcCreateInstanceProc)(
-    _In_ REFCLSID   rclsid,
-    _In_ REFIID     riid,
-    _Out_ LPVOID*   ppv
+    _In_ REFCLSID         rclsid,
+    _In_ REFIID           riid,
+    _COM_Outptr_ LPVOID  *ppv
 );
 
 typedef HRESULT(__stdcall *DxcCreateInstance2Proc)(
-  _In_ IMalloc    *pMalloc,
-  _In_ REFCLSID   rclsid,
-  _In_ REFIID     riid,
-  _Out_ LPVOID*   ppv
+  _In_ IMalloc         *pMalloc,
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv
   );
 
 /// <summary>
@@ -76,15 +76,15 @@ extern "C"
 DXC_API_IMPORT HRESULT __stdcall DxcCreateInstance(
   _In_ REFCLSID   rclsid,
   _In_ REFIID     riid,
-  _Out_ LPVOID*   ppv
+  _COM_Outptr_ LPVOID*   ppv
   );
 
 extern "C"
 DXC_API_IMPORT HRESULT __stdcall DxcCreateInstance2(
-  _In_ IMalloc    *pMalloc,
-  _In_ REFCLSID   rclsid,
-  _In_ REFIID     riid,
-  _Out_ LPVOID*   ppv
+  _In_ IMalloc         *pMalloc,
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv
 );
 
 // For convenience, equivalent definitions to CP_UTF8 and CP_UTF16.

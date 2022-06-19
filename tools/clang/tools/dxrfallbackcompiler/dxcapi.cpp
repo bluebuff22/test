@@ -22,9 +22,9 @@
 HRESULT CreateDxcDxrFallbackCompiler(_In_ REFIID riid, _Out_ LPVOID *ppv);
 
 static HRESULT ThreadMallocDxcCreateInstance(
-  _In_ REFCLSID   rclsid,
-                  _In_ REFIID     riid,
-                  _Out_ LPVOID   *ppv) {
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv) {
   HRESULT hr = S_OK;
   *ppv = nullptr;
 
@@ -39,9 +39,9 @@ static HRESULT ThreadMallocDxcCreateInstance(
 
 DXC_API_IMPORT HRESULT __stdcall
 DxcCreateDxrFallbackCompiler(
-  _In_ REFCLSID   rclsid,
-  _In_ REFIID     riid,
-  _Out_ LPVOID   *ppv) {
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv) {
   if (ppv == nullptr) {
     return E_POINTER;
   }
