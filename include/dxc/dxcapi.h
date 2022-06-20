@@ -443,7 +443,8 @@ struct IDxcUtils : public IUnknown {
   // Create reflection interface from serialized Dxil container, or DXC_PART_REFLECTION_DATA.
   // TBD: Require part header for RDAT?  (leaning towards yes)
   virtual HRESULT STDMETHODCALLTYPE CreateReflection(
-    _In_ const DxcBuffer *pData, REFIID iid, void **ppvReflection) = 0;
+    _In_ const DxcBuffer *pData, REFIID iid,
+    _COM_Outptr_result_maybenull_ void **ppvReflection) = 0;
 
   virtual HRESULT STDMETHODCALLTYPE BuildArguments(
     _In_opt_z_ LPCWSTR pSourceName,               // Optional file name for pSource. Used in errors and include handlers.
@@ -518,13 +519,15 @@ struct IDxcCompiler3 : public IUnknown {
     _In_opt_count_(argCount) LPCWSTR *pArguments, // Array of pointers to arguments
     _In_ UINT32 argCount,                         // Number of arguments
     _In_opt_ IDxcIncludeHandler *pIncludeHandler, // user-provided interface to handle #include directives (optional)
-    _In_ REFIID riid, _Out_ LPVOID *ppResult      // IDxcResult: status, buffer, and errors
+    _In_ REFIID riid,
+    _COM_Outptr_ LPVOID *ppResult                 // IDxcResult: status, buffer, and errors
   ) = 0;
 
   // Disassemble a program.
   virtual HRESULT STDMETHODCALLTYPE Disassemble(
     _In_ const DxcBuffer *pObject,                // Program to disassemble: dxil container or bitcode.
-    _In_ REFIID riid, _Out_ LPVOID *ppResult      // IDxcResult: status, disassembly text, and errors
+    _In_ REFIID riid,
+    _COM_Outptr_ LPVOID *ppResult                 // IDxcResult: status, disassembly text, and errors
     ) = 0;
 };
 
@@ -560,7 +563,7 @@ struct IDxcContainerBuilder : public IUnknown {
   virtual HRESULT STDMETHODCALLTYPE Load(_In_ IDxcBlob *pDxilContainerHeader) = 0;                // Loads DxilContainer to the builder
   virtual HRESULT STDMETHODCALLTYPE AddPart(_In_ UINT32 fourCC, _In_ IDxcBlob *pSource) = 0;      // Part to add to the container
   virtual HRESULT STDMETHODCALLTYPE RemovePart(_In_ UINT32 fourCC) = 0;                           // Remove the part with fourCC
-  virtual HRESULT STDMETHODCALLTYPE SerializeContainer(_Out_ IDxcOperationResult **ppResult) = 0; // Builds a container of the given container builder state
+  virtual HRESULT STDMETHODCALLTYPE SerializeContainer(_COM_Outptr_ IDxcOperationResult **ppResult) = 0; // Builds a container of the given container builder state
 };
 
 CROSS_PLATFORM_UUIDOF(IDxcAssembler, "091f7a26-1c1f-4948-904b-e6e3a8a771d5")

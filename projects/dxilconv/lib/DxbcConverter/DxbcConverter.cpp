@@ -63,7 +63,7 @@ __override HRESULT STDMETHODCALLTYPE DxbcConverter::ConvertInDriver(_In_reads_by
                                                        _In_opt_z_ LPCVOID pPatchConstantSignature,
                                                        _In_ UINT32 NumPatchConstantSignatureElements,
                                                        _In_opt_z_ LPCWSTR pExtraOptions,
-                                                       _Out_ IDxcBlob **ppDxilModule,
+                                                       _COM_Outptr_ IDxcBlob **ppDxilModule,
                                                        _Outptr_result_maybenull_z_ LPWSTR *ppDiag) {
     DxcThreadMalloc TM(m_pMalloc);
     LARGE_INTEGER start, end;
@@ -353,7 +353,7 @@ void DxbcConverter::ConvertInDriverImpl(_In_reads_bytes_(8) const UINT32 *pByteC
                                         _In_opt_z_ const D3D12DDIARG_SIGNATURE_ENTRY_0012 *pPatchConstantSignature,
                                         _In_ UINT32 NumPatchConstantSignatureElements,
                                         _In_opt_z_ LPCWSTR pExtraOptions,
-                                        _Out_ IDxcBlob **ppDxcBlob,
+                                        _COM_Outptr_ IDxcBlob **ppDxcBlob,
                                         _Outptr_result_maybenull_z_ LPWSTR *ppDiag) {
   IFTARG(pByteCode);
   IFTARG(ppDxcBlob);
@@ -7361,5 +7361,3 @@ HRESULT CreateDxbcConverter(_In_ REFIID riid, _Out_ LPVOID *ppv) {
   }
   CATCH_CPP_RETURN_HRESULT();
 }
-
-

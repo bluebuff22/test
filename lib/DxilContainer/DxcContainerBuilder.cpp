@@ -94,7 +94,7 @@ HRESULT STDMETHODCALLTYPE DxcContainerBuilder::RemovePart(_In_ UINT32 fourCC) {
   CATCH_CPP_RETURN_HRESULT();
 }
 
-HRESULT STDMETHODCALLTYPE DxcContainerBuilder::SerializeContainer(_Out_ IDxcOperationResult **ppResult) {
+HRESULT STDMETHODCALLTYPE DxcContainerBuilder::SerializeContainer(_COM_Outptr_ IDxcOperationResult **ppResult) {
   DxcThreadMalloc TM(m_pMalloc);
   try {
     // Allocate memory for new dxil container.
