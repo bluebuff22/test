@@ -81,8 +81,7 @@ static HRESULT CopyWstringToBSTR(const std::wstring &str, BSTR *pResult) {
   if (str.empty())
     return S_OK;
 
-  CComBSTR buf(str.data());
-  *pResult = buf.Detach();
+  *pResult = _wcsdup(str.data());
   return S_OK;
 }
 
@@ -924,7 +923,7 @@ public:
   {
     if (!m_pDebugProgramBlob)
       return E_FAIL;
-
+#ifndef __MINGW32__
     DxcThreadMalloc TM(m_pMalloc);
 
     CComPtr<IDiaDataSource> pDataSource;
@@ -942,6 +941,9 @@ public:
     IFR(pSession.QueryInterface(&pFactory));
 
     return pFactory->NewDxcPixDxilDebugInfo(ppDxilDebugInfo);
+#else
+    return E_FAIL;
+#endif
   }
 
   virtual STDMETHODIMP NewDxcPixCompilationInfo(

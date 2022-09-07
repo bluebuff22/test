@@ -37,7 +37,9 @@
 #include "dxc/dxcapi.h"
 
 #ifdef LLVM_ON_WIN32
-#include "d3d12shader.h" // for compatibility
+#include <directx/d3d12shader.h> // for compatibility
+#include <dxguids/dxguids.h>
+
 #include "d3d11shader.h" // for compatibility
 
 #include "dxc/DxilContainer/DxilRuntimeReflection.h"
@@ -1348,7 +1350,6 @@ static unsigned CalcTypeSize(Type *Ty, unsigned &alignment) {
 }
 
 static unsigned CalcResTypeSize(DxilModule &M, DxilResource &R) {
-  UNREFERENCED_PARAMETER(M);
   Type *Ty = R.GetHLSLType()->getPointerElementType();
   if (R.IsStructuredBuffer()) {
     Ty = dxilutil::StripArrayTypes(Ty);

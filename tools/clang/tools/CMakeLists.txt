@@ -28,7 +28,7 @@ add_subdirectory(dxclib)
 add_subdirectory(dxc)
 
 # These targets can currently only be built on Windows.
-if (WIN32)
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
 add_subdirectory(d3dcomp)
 add_subdirectory(dxrfallbackcompiler)
 add_subdirectory(dxa)
@@ -39,5 +39,5 @@ add_subdirectory(dxv)
 add_subdirectory(dxlib-sample)
 # UI powered by .NET.
 add_subdirectory(dotnetc)
-endif (WIN32)
+endif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
 # HLSL Change Ends

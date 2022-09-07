@@ -15,8 +15,12 @@
 #ifndef LLVM_SUPPORT_WIN_ADAPTER_H
 #define LLVM_SUPPORT_WIN_ADAPTER_H
 
-#ifndef _WIN32
-
+#if defined(_WIN32) && !defined(__MINGW32__)
+#ifndef CROSS_PLATFORM_UUIDOF
+#define CROSS_PLATFORM_UUIDOF(interface, spec)                                 \
+  struct __declspec(uuid(spec)) interface;
+#endif // CROSS_PLATFORM_UUIDOF
+#else // defined(_WIN32) && !defined(__MINGW32__)
 #ifdef __cplusplus
 #include <atomic>
 #include <cassert>
@@ -24,22 +28,31 @@
 #include <cstring>
 #include <cwchar>
 #include <fstream>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <string>
 #include <typeindex>
 #include <typeinfo>
 #include <vector>
 #endif // __cplusplus
 
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+#if defined(__MINGW32__)
+#include <guiddef.h>
+#include <sal.h>
+#else // defined(__MINGW32__)
+#include <dlfcn.h>
+#endif // defined(__MINGW32__)
+
 //===----------------------------------------------------------------------===//
 //
 //                             Begin: Macro Definitions
 //
 //===----------------------------------------------------------------------===//
+#if !defined(__MINGW32__)
 #define C_ASSERT(expr) static_assert((expr), "")
-#define ATLASSERT assert
 
 #define CoTaskMemAlloc malloc
 #define CoTaskMemFree free
@@ -235,99 +248,256 @@
 #define HRESULT_FROM_WIN32(x)                                                  \
   (HRESULT)(x) <= 0 ? (HRESULT)(x)                                             \
                     : (HRESULT)(((x)&0x0000FFFF) | (7 << 16) | 0x80000000)
+#else
+#ifndef ERROR_NOT_CAPABLE
+#define ERROR_NOT_CAPABLE EPERM
+#endif
+#ifndef ERROR_UNHANDLED_EXCEPTION
+#define ERROR_UNHANDLED_EXCEPTION EBADF
+#endif
+#ifndef E_NOT_VALID_STATE
+#define E_NOT_VALID_STATE (HRESULT)0x8007139F
+#endif
+#ifndef E_BOUNDS
+#define E_BOUNDS (HRESULT)0x8000000B
+#endif
+#endif // !defined(__MINGW32__)
 
 //===----------------------------------------------------------------------===//
 //
 //                         Begin: Disable SAL Annotations
 //
 //===----------------------------------------------------------------------===//
+#ifndef _In_
 #define _In_
+#endif
+#ifndef _In_z_
 #define _In_z_
+#endif
+#ifndef _In_opt_
 #define _In_opt_
+#endif
+#ifndef _In_opt_count_
 #define _In_opt_count_(size)
+#endif
 #define _In_opt_z_
+#ifndef _In_reads_
 #define _In_reads_(size)
+#endif
+#ifndef _In_reads_bytes_
 #define _In_reads_bytes_(size)
+#endif
+#ifndef _In_reads_bytes_opt_
 #define _In_reads_bytes_opt_(size)
+#endif
+#ifndef _In_reads_opt_
 #define _In_reads_opt_(size)
+#endif
+#ifndef _In_reads_to_ptr_
 #define _In_reads_to_ptr_(ptr)
+#endif
+#ifndef _In_count_
 #define _In_count_(size)
+#endif
+#ifndef _In_range_
 #define _In_range_(lb, ub)
+#endif
+#ifndef _In_bytecount_
 #define _In_bytecount_(size)
+#endif
+#ifndef _In_opt_bytecount_
 #define _In_opt_bytecount_(size)
+#endif
+#ifndef _In_NLS_string_
 #define _In_NLS_string_(size)
+#endif
+#ifndef __in_bcount
 #define __in_bcount(size)
-
+#endif
+#ifndef _Out_
 #define _Out_
+#endif
+#ifndef _Out_bytecap_
 #define _Out_bytecap_(nbytes)
+#endif
+#ifndef _Out_writes_to_
 #define _Out_writes_to_(a, b)
+#endif
+#ifndef _Out_writes_to_opt_
 #define _Out_writes_to_opt_(a, b)
+#endif
+#ifndef _Outptr_
 #define _Outptr_
+#endif
+#ifndef _Outptr_opt_
 #define _Outptr_opt_
+#endif
+#ifndef _Outptr_opt_result_z_
 #define _Outptr_opt_result_z_
+#endif
+#ifndef _Out_opt_
 #define _Out_opt_
+#endif
+#ifndef _Out_writes_
 #define _Out_writes_(size)
+#endif
+#ifndef _Out_write_bytes_
 #define _Out_write_bytes_(size)
+#endif
+#ifndef _Out_writes_z_
 #define _Out_writes_z_(size)
+#endif
+#ifndef _Out_writes_all_
 #define _Out_writes_all_(size)
+#endif
+#ifndef _Out_writes_bytes_
 #define _Out_writes_bytes_(size)
+#endif
+#ifndef _Outref_result_buffer_
 #define _Outref_result_buffer_(size)
+#endif
+#ifndef _Outptr_result_buffer_
 #define _Outptr_result_buffer_(size)
+#endif
+#ifndef _Out_cap_
 #define _Out_cap_(size)
+#endif
+#ifndef _Out_cap_x_
 #define _Out_cap_x_(size)
+#endif
+#ifndef _Out_range_
 #define _Out_range_(lb, ub)
+#endif
+#ifndef _Outptr_result_z_
 #define _Outptr_result_z_
+#endif
+#ifndef _Outptr_result_buffer_maybenull_
 #define _Outptr_result_buffer_maybenull_(ptr)
+#endif
+#ifndef _Outptr_result_maybenull_
 #define _Outptr_result_maybenull_
+#endif
+#ifndef _Outptr_result_nullonfailure_
 #define _Outptr_result_nullonfailure_
+#endif
 
+#ifndef __out_ecount_part
 #define __out_ecount_part(a, b)
+#endif
 
+#ifndef _Inout_
 #define _Inout_
+#endif
+#ifndef _Inout_z_
 #define _Inout_z_
+#endif
+#ifndef _Inout_opt_
 #define _Inout_opt_
+#endif
+#ifndef _Inout_cap_
 #define _Inout_cap_(size)
+#endif
+#ifndef _Inout_count_
 #define _Inout_count_(size)
+#endif
+#ifndef _Inout_count_c_
 #define _Inout_count_c_(size)
+#endif
+#ifndef _Inout_opt_count_c_
 #define _Inout_opt_count_c_(size)
+#endif
+#ifndef _Inout_bytecount_c_
 #define _Inout_bytecount_c_(size)
+#endif
+#ifndef _Inout_opt_bytecount_c_
 #define _Inout_opt_bytecount_c_(size)
+#endif
 
+#ifndef _Ret_maybenull_
 #define _Ret_maybenull_
+#endif
+#ifndef _Ret_notnull_
 #define _Ret_notnull_
+#endif
+#ifndef _Ret_opt_
 #define _Ret_opt_
+#endif
 
+#ifndef _Use_decl_annotations_
 #define _Use_decl_annotations_
+#endif
+#ifndef __analysis_assume
 #define __analysis_assume(expr)
+#endif
+#ifndef _Analysis_assume_
 #define _Analysis_assume_(expr)
+#endif
+#ifndef _Analysis_assume_nullterminated_
 #define _Analysis_assume_nullterminated_(x)
+#endif
+#ifndef _Success_
 #define _Success_(expr)
+#endif
 
+#ifndef __inexpressible_readableTo
 #define __inexpressible_readableTo(size)
+#endif
+#ifndef __inexpressible_writableTo
 #define __inexpressible_writableTo(size)
+#endif
 
+#ifndef _Printf_format_string_
 #define _Printf_format_string_
+#endif
+#ifndef _Null_terminated_
 #define _Null_terminated_
+#endif
+#ifndef __fallthrough
 #define __fallthrough
+#endif
 
+#ifndef _Field_size_
 #define _Field_size_(size)
+#endif
+#ifndef _Field_size_full_
 #define _Field_size_full_(size)
+#endif
+#ifndef _Field_size_opt_
 #define _Field_size_opt_(size)
+#endif
+#ifndef _Post_writable_byte_size_
 #define _Post_writable_byte_size_(size)
+#endif
+#ifndef _Post_readable_byte_size_
 #define _Post_readable_byte_size_(size)
+#endif
+#ifndef __drv_allocatesMem
 #define __drv_allocatesMem(mem)
+#endif
 
 #define _COM_Outptr_
 #define _COM_Outptr_opt_
 #define _COM_Outptr_result_maybenull_
 #define _COM_Outptr_opt_result_maybenull_
 
+#ifndef _Null_
 #define _Null_
+#endif
+#ifndef _Notnull_
 #define _Notnull_
+#endif
+#ifndef _Maybenull_
 #define _Maybenull_
+#endif
 
+#ifndef _Outptr_result_bytebuffer_
 #define _Outptr_result_bytebuffer_(size)
+#endif
+#ifndef _Pre_cap_
+#define _Pre_cap_(x)
+#endif
 
+#if !defined(__MINGW32__)
 #define __debugbreak()
 
 // GCC produces erros on calling convention attributes.
@@ -340,6 +510,7 @@
 #define __fastcall
 #define __clrcall
 #endif // __GNUC__
+#endif // !defined(__MINGW32__)
 
 //===----------------------------------------------------------------------===//
 //
@@ -349,6 +520,7 @@
 
 #ifdef __cplusplus
 
+#if !defined(__MINGW32__)
 typedef unsigned char BYTE, UINT8;
 typedef unsigned char *LPBYTE;
 
@@ -541,11 +713,13 @@ enum tagSTATFLAG {
   STATFLAG_NOOPEN = 2
 };
 
+#endif // !defined(__MINGW32__)
+
 //===--------------------- UUID Related Macros ----------------------------===//
 
-#ifdef __EMULATE_UUID
+#if defined(__MINGW32__)  || defined(__EMULATE_UUID)
 
-// The following macros are defined to facilitate the lack of 'uuid' on Linux.
+// The following macros are defined to facilitate the lack of 'uuid' on Linux and MINGW.
 
 constexpr uint8_t nybble_from_hex(char c) {
   return ((c >= '0' && c <= '9')
@@ -563,39 +737,55 @@ constexpr uint8_t byte_from_hex(char c1, char c2) {
 constexpr uint8_t byte_from_hexstr(const char str[2]) {
   return nybble_from_hex(str[0]) << 4 | nybble_from_hex(str[1]);
 }
-
-constexpr GUID guid_from_string(const char str[37]) {
-  return GUID{static_cast<uint32_t>(byte_from_hexstr(str)) << 24 |
-                  static_cast<uint32_t>(byte_from_hexstr(str + 2)) << 16 |
-                  static_cast<uint32_t>(byte_from_hexstr(str + 4)) << 8 |
-                  byte_from_hexstr(str + 6),
-              static_cast<uint16_t>(
-                  static_cast<uint16_t>(byte_from_hexstr(str + 9)) << 8 |
-                  byte_from_hexstr(str + 11)),
-              static_cast<uint16_t>(
-                  static_cast<uint16_t>(byte_from_hexstr(str + 14)) << 8 |
-                  byte_from_hexstr(str + 16)),
-              {byte_from_hexstr(str + 19), byte_from_hexstr(str + 21),
-               byte_from_hexstr(str + 24), byte_from_hexstr(str + 26),
-               byte_from_hexstr(str + 28), byte_from_hexstr(str + 30),
-               byte_from_hexstr(str + 32), byte_from_hexstr(str + 34)}};
+constexpr unsigned short short_from_hexstr(const char str[2], unsigned shift) {
+  return ((unsigned short)(nybble_from_hex(str[0]) << 4 |
+                           nybble_from_hex(str[1])))
+         << shift;
 }
 
-template <typename interface> inline GUID __emulated_uuidof();
+constexpr unsigned long word_from_hexstr(const char str[2], unsigned shift) {
+  return ((unsigned long)(nybble_from_hex(str[0]) << 4 |
+                          nybble_from_hex(str[1])))
+         << shift;
+}
+
+#ifdef __EMULATE_UUID
+#define __CRT_UUID_DECL(type, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8)       \
+  extern "C++" {                                                               \
+  template <> struct __emulated_uuidof_s<type> {                               \
+    static constexpr IID __uuid_inst = {                                       \
+        l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}};                          \
+  };                                                                           \
+  template <> constexpr const GUID &__emulated_uuidof<type>() {                \
+    return __emulated_uuidof_s<type>::__uuid_inst;                             \
+  }                                                                            \
+  template <> constexpr const GUID &__emulated_uuidof<type *>() {              \
+    return __emulated_uuidof_s<type>::__uuid_inst;                             \
+  }                                                                            \
+  }
+#endif
 
 #define CROSS_PLATFORM_UUIDOF(interface, spec)                                 \
   struct interface;                                                            \
-  template <> inline GUID __emulated_uuidof<interface>() {                     \
-    static const IID _IID = guid_from_string(spec);                            \
-    return _IID;                                                               \
-  }
+  __CRT_UUID_DECL(                                                             \
+      interface,                                                               \
+      word_from_hexstr(spec, 24) | word_from_hexstr(spec + 2, 16) |            \
+          word_from_hexstr(spec + 4, 8) | word_from_hexstr(spec + 6, 0),       \
+      short_from_hexstr(spec + 9, 8) | short_from_hexstr(spec + 11, 0),        \
+      short_from_hexstr(spec + 14, 8) | short_from_hexstr(spec + 16, 0),       \
+      byte_from_hexstr(spec + 19), byte_from_hexstr(spec + 21),                \
+      byte_from_hexstr(spec + 24), byte_from_hexstr(spec + 26),                \
+      byte_from_hexstr(spec + 28), byte_from_hexstr(spec + 30),                \
+      byte_from_hexstr(spec + 32), byte_from_hexstr(spec + 34))
 
+#ifdef __EMULATE_UUID
 #define __uuidof(T) __emulated_uuidof<typename std::decay<T>::type>()
 
 #define IID_PPV_ARGS(ppType)                                                   \
   __uuidof(decltype(**(ppType))), reinterpret_cast<void **>(ppType)
+#endif // __EMULATE_UUID
 
-#else // __EMULATE_UUID
+#else // defined(__MINGW32__)  || defined(__EMULATE_UUID)
 
 #ifndef CROSS_PLATFORM_UUIDOF
 // Warning: This macro exists in dxcapi.h as well
@@ -608,8 +798,9 @@ template <typename T> inline void **IID_PPV_ARGS_Helper(T **pp) {
 }
 #define IID_PPV_ARGS(ppType) __uuidof(**(ppType)), IID_PPV_ARGS_Helper(ppType)
 
-#endif // __EMULATE_UUID
+#endif // defined(__MINGW32__)  || defined(__EMULATE_UUID)
 
+#if !defined(__MINGW32__)
 //===--------------------- COM Interfaces ---------------------------------===//
 
 CROSS_PLATFORM_UUIDOF(IUnknown, "00000000-0000-0000-C000-000000000046")
@@ -668,8 +859,36 @@ struct IStream : public ISequentialStream {
   virtual HRESULT Clone(IStream **ppstm) = 0;
 };
 
-//===--------------------- COM Pointer Types ------------------------------===//
+//===--------------------------- BSTR Allocation --------------------------===//
 
+void SysFreeString(BSTR bstrString);
+// Allocate string with length prefix
+BSTR SysAllocStringLen(const OLECHAR *strIn, UINT ui);
+
+#endif // !defined(__MINGW32__)
+
+#endif // __cplusplus
+
+#endif // defined(_WIN32) && !defined(__MINGW32__)
+
+#endif // LLVM_SUPPORT_WIN_ADAPTER_H
+
+#ifndef LLVM_SUPPORT_WIN_ADAPTER_ATL_H
+//===--------------------- COM Pointer Types ------------------------------===//
+#if (defined(__unknwn_h__) && defined(__MINGW32__)) || !defined(_WIN32)
+
+// For the first time include of `WinAdapter.h`, `__unknwn_h__` may not present yet
+// So only when __unknwn_h__ present or non-win32 platform willl cause LLVM_SUPPORT_WIN_ADAPTER_ATL_H
+// to be defined
+#define LLVM_SUPPORT_WIN_ADAPTER_ATL_H
+
+#define UInt32Add UIntAdd
+#define Int32ToUInt32 IntToUInt
+#define ATLASSERT assert
+#define STRSAFE_NO_DEPRECATE
+typedef BSTR CComBSTR;
+
+#ifdef __cplusplus
 class CAllocator {
 public:
   static void *Reallocate(void *p, size_t nBytes) throw();
@@ -927,12 +1146,6 @@ public:
 
 #define CComHeapPtr CHeapPtr
 
-//===--------------------------- BSTR Allocation --------------------------===//
-
-void SysFreeString(BSTR bstrString);
-// Allocate string with length prefix
-BSTR SysAllocStringLen(const OLECHAR *strIn, UINT ui);
-
 //===--------------------- UTF-8 Related Types ----------------------------===//
 
 // Code Page
@@ -1023,6 +1236,6 @@ private:
 
 #endif // __cplusplus
 
-#endif // _WIN32
+#endif // (defined(__unknwn_h__) && defined(__MINGW32__)) || !defined(_WIN32)
 
-#endif // LLVM_SUPPORT_WIN_ADAPTER_H
+#endif // LLVM_SUPPORT_WIN_ADAPTER_ATL_H
