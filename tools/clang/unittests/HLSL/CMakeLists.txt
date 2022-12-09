@@ -49,6 +49,7 @@ add_clang_library(ClangHLSLTests SHARED
   SystemValueTest.cpp
   ValidationTest.cpp
   VerifierTest.cpp
+  ViewIDValidationTest.cpp
   clang-hlsl-tests.rc
   )
 
