@@ -38,6 +38,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <unordered_set>
 using namespace llvm;
 
 #define DEBUG_TYPE "deadargelim"
@@ -112,7 +113,7 @@ namespace {
     UseMap Uses;
 
     typedef std::set<RetOrArg> LiveSet;
-    typedef std::set<const Function*> LiveFuncSet;
+    typedef std::unordered_set<const Function*> LiveFuncSet;
 
     /// This set contains all values that have been determined to be live.
     LiveSet LiveValues;

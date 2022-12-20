@@ -18,6 +18,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include <set>
+#include <unordered_set>
 #include <vector>
 
 namespace llvm {
@@ -129,7 +130,7 @@ class SparseSolver {
   /// KnownFeasibleEdges - Entries in this set are edges which have already had
   /// PHI nodes retriggered.
   typedef std::pair<BasicBlock*,BasicBlock*> Edge;
-  std::set<Edge> KnownFeasibleEdges;
+  std::unordered_set<Edge> KnownFeasibleEdges;
 
   SparseSolver(const SparseSolver&) = delete;
   void operator=(const SparseSolver&) = delete;

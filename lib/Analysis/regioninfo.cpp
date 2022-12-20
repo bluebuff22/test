@@ -20,7 +20,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include <iterator>
-#include <set>
 
 using namespace llvm;
 

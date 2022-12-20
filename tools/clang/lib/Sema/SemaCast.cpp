@@ -25,7 +25,7 @@
 #include "clang/Sema/Initialization.h"
 #include "llvm/ADT/SmallVector.h"
 #include "clang/Sema/SemaHLSL.h" // HLSL Change
-#include <set>
+#include <unordered_set>
 using namespace clang;
 
 

@@ -23,6 +23,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdio>
+#include <unordered_set>
 
 using namespace clang;
 
@@ -3538,7 +3539,7 @@ static const FullPathTy *selectBestPath(ASTContext &Context,
     return &FullPaths.front();
 
   const FullPathTy *BestPath = nullptr;
-  typedef std::set<const CXXMethodDecl *> OverriderSetTy;
+  typedef std::unordered_set<const CXXMethodDecl *> OverriderSetTy;
   OverriderSetTy LastOverrides;
   for (const FullPathTy &SpecificPath : FullPaths) {
     assert(!SpecificPath.empty());

@@ -25,7 +25,6 @@
 #include "DxcPixTypes.h"
 #include "DxilDiaSession.h"
 
-#include <set>
 #include <vector>
 
 namespace dxil_debug_info

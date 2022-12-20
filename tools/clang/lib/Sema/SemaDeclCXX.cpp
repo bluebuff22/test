@@ -41,7 +41,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include <map>
-#include <set>
+#include <unordered_set>
 #include "clang/Basic/Specifiers.h" // HLSL Change
 
 using namespace clang;

@@ -22,7 +22,6 @@
 #include <memory>
                               // lands.
 #include <list>
-#include <set>
 #include <string>
 
 namespace llvm {

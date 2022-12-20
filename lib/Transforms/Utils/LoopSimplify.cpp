@@ -65,6 +65,7 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
+#include <unordered_set>
 using namespace llvm;
 
 #define DEBUG_TYPE "loop-simplify"
@@ -190,7 +191,7 @@ static BasicBlock *rewriteLoopExitBlock(Loop *L, BasicBlock *Exit,
 /// if it's not already in there.  Stop predecessor traversal when we reach
 /// StopBlock.
 static void addBlockAndPredsToSet(BasicBlock *InputBB, BasicBlock *StopBlock,
-                                  std::set<BasicBlock*> &Blocks) {
+                                  std::unordered_set<BasicBlock*> &Blocks) {
   SmallVector<BasicBlock *, 8> Worklist;
   Worklist.push_back(InputBB);
   do {
@@ -319,7 +320,7 @@ static Loop *separateNestedLoop(Loop *L, BasicBlock *Preheader,
 
   // Determine which blocks should stay in L and which should be moved out to
   // the Outer loop now.
-  std::set<BasicBlock*> BlocksInL;
+  std::unordered_set<BasicBlock*> BlocksInL;
   for (pred_iterator PI=pred_begin(Header), E = pred_end(Header); PI!=E; ++PI) {
     BasicBlock *P = *PI;
     if (DT->dominates(Header, P))

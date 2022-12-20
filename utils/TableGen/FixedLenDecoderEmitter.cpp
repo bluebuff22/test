@@ -28,6 +28,7 @@
 #include "llvm/TableGen/Record.h"
 #include <map>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 using namespace llvm;
@@ -1715,7 +1716,7 @@ static bool populateInstruction(CodeGenTarget &Target,
   }
 
   std::map<std::string, std::vector<OperandInfo> > NumberedInsnOperands;
-  std::set<std::string> NumberedInsnOperandsNoTie;
+  std::unordered_set<std::string> NumberedInsnOperandsNoTie;
   if (Target.getInstructionSet()->
         getValueAsBit("decodePositionallyEncodedOperands")) {
     const std::vector<RecordVal> &Vals = Def.getValues();
