@@ -2755,7 +2755,43 @@ void SROA_Helper::RewriteCall(CallInst *CI) {
     }
     // TODO: check other high level dx operations if need to.
   } else {
-    DXASSERT(0, "should done at inline");
+    auto *ST = cast<StructType>(OldVal->getType()->getPointerElementType());
+    IRBuilder<> AllocaB(
+        CI->getParent()->getParent()->getEntryBlock().getFirstInsertionPt());
+    Value *TmpVal = AllocaB.CreateAlloca(ST);
+    IRBuilder<> InB(CI);
+    IRBuilder<> OutB(CI->getNextNode());
+    DxilFunctionAnnotation *FnAnnot =
+        typeSys.GetFunctionAnnotation(CI->getCalledFunction());
+    DXASSERT(FnAnnot, "fail to find function annotation");
+    // Method calls on const instances are allowed even though HLSL doesn't
+    // support const on methods. Until const on methods supported, skip copy-out
+    // if original pointer is const.
+    bool IsConst = false;
+    if (auto *GV = dyn_cast<GlobalVariable>(OldVal))
+      IsConst = GV->isConstant();
+    unsigned Size = DL.getTypeAllocSize(ST);
+    unsigned Align = 4;
+    for (unsigned I = 0; I < CI->getNumArgOperands(); ++I) {
+      Value *Arg = CI->getArgOperand(I);
+      if (Arg != OldVal)
+        continue;
+      DxilParamInputQual ParamQual =
+          FnAnnot->GetParameterAnnotation(I).GetParamInputQual();
+      if (ParamQual == DxilParamInputQual::In ||
+          ParamQual == DxilParamInputQual::Inout) {
+        auto *MC =
+            cast<MemCpyInst>(InB.CreateMemCpy(TmpVal, OldVal, Size, Align));
+        MemcpySplitter::SplitMemCpy(MC, DL, nullptr, typeSys);
+      }
+      if (!IsConst && (ParamQual == DxilParamInputQual::Out ||
+                       ParamQual == DxilParamInputQual::Inout)) {
+        auto *MC =
+            cast<MemCpyInst>(OutB.CreateMemCpy(OldVal, TmpVal, Size, Align));
+        MemcpySplitter::SplitMemCpy(MC, DL, nullptr, typeSys);
+      }
+      CI->setArgOperand(I, TmpVal);
+    }
   }
 }
 
