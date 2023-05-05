@@ -298,7 +298,7 @@ public:
                                                        _In_opt_z_ LPCVOID pPatchConstantSignature,
                                                        _In_ UINT32 NumPatchConstantSignatureElements,
                                                        _In_opt_z_ LPCWSTR pExtraOptions,
-                                                       _Out_ IDxcBlob **ppDxilModule,
+                                                       _COM_Outptr_ IDxcBlob **ppDxilModule,
                                                        _Outptr_result_maybenull_z_ LPWSTR *ppDiag);
 
 protected:
@@ -513,7 +513,7 @@ protected:
                            _In_opt_ const D3D12DDIARG_SIGNATURE_ENTRY_0012 *pPatchConstantSignature,
                            _In_ UINT32 NumPatchConstantSignatureElements,
                            _In_opt_z_ LPCWSTR pExtraOptions,
-                           _Out_ IDxcBlob **ppDxcBlob,
+                           _COM_Outptr_ IDxcBlob **ppDxcBlob,
                            _Outptr_result_maybenull_z_ LPWSTR *ppDiag);
 
   virtual void LogConvertResult(bool InDriver,

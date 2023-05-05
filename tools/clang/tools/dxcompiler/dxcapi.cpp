@@ -75,9 +75,9 @@ HRESULT CreateDxcContainerBuilder(_In_ REFIID riid, _Out_ LPVOID *ppv) {
 }
 
 static HRESULT ThreadMallocDxcCreateInstance(
-  _In_ REFCLSID   rclsid,
-                  _In_ REFIID     riid,
-                  _Out_ LPVOID   *ppv) {
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv) {
   HRESULT hr = S_OK;
   *ppv = nullptr;
   if (IsEqualCLSID(rclsid, CLSID_DxcCompiler)) {
@@ -134,9 +134,9 @@ static HRESULT ThreadMallocDxcCreateInstance(
 
 DXC_API_IMPORT HRESULT __stdcall
 DxcCreateInstance(
-  _In_ REFCLSID   rclsid,
-  _In_ REFIID     riid,
-  _Out_ LPVOID   *ppv) {
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv) {
   if (ppv == nullptr) {
     return E_POINTER;
   }
@@ -151,10 +151,10 @@ DxcCreateInstance(
 
 DXC_API_IMPORT HRESULT __stdcall
 DxcCreateInstance2(
-  _In_ IMalloc    *pMalloc,
-  _In_ REFCLSID   rclsid,
-  _In_ REFIID     riid,
-  _Out_ LPVOID   *ppv) {
+  _In_ IMalloc         *pMalloc,
+  _In_ REFCLSID         rclsid,
+  _In_ REFIID           riid,
+  _COM_Outptr_ LPVOID  *ppv) {
   if (ppv == nullptr) {
     return E_POINTER;
   }

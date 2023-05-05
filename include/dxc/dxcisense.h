@@ -716,7 +716,7 @@ struct IDxcIndex : public IUnknown
       _In_count_(num_unsaved_files) IDxcUnsavedFile** unsaved_files,
       unsigned num_unsaved_files,
       DxcTranslationUnitFlags options,
-      _Out_ IDxcTranslationUnit** pTranslationUnit) = 0;
+      _COM_Outptr_ IDxcTranslationUnit** pTranslationUnit) = 0;
 };
 
 CROSS_PLATFORM_UUIDOF(IDxcSourceLocation, "8e7ddf1c-d7d3-4d69-b286-85fccba1e0cf")
@@ -739,8 +739,8 @@ CROSS_PLATFORM_UUIDOF(IDxcSourceRange, "f1359b36-a53f-4e81-b514-b6b84122a13f")
 struct IDxcSourceRange : public IUnknown
 {
   virtual HRESULT STDMETHODCALLTYPE IsNull(_Out_ BOOL* pValue) = 0;
-  virtual HRESULT STDMETHODCALLTYPE GetStart(_Out_ IDxcSourceLocation** pValue) = 0;
-  virtual HRESULT STDMETHODCALLTYPE GetEnd(_Out_ IDxcSourceLocation** pValue) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetStart(_COM_Outptr_ IDxcSourceLocation** pValue) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetEnd(_COM_Outptr_ IDxcSourceLocation** pValue) = 0;
   virtual HRESULT STDMETHODCALLTYPE GetOffsets(_Out_ unsigned* startOffset, _Out_ unsigned* endOffset) = 0;
 };
 
@@ -748,15 +748,15 @@ CROSS_PLATFORM_UUIDOF(IDxcToken, "7f90b9ff-a275-4932-97d8-3cfd234482a2")
 struct IDxcToken : public IUnknown
 {
   virtual HRESULT STDMETHODCALLTYPE GetKind(_Out_ DxcTokenKind* pValue) = 0;
-  virtual HRESULT STDMETHODCALLTYPE GetLocation(_Out_ IDxcSourceLocation** pValue) = 0;
-  virtual HRESULT STDMETHODCALLTYPE GetExtent(_Out_ IDxcSourceRange** pValue) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetLocation(_COM_Outptr_ IDxcSourceLocation** pValue) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetExtent(_COM_Outptr_ IDxcSourceRange** pValue) = 0;
   virtual HRESULT STDMETHODCALLTYPE GetSpelling(_Out_ LPSTR* pValue) = 0;
 };
 
 CROSS_PLATFORM_UUIDOF(IDxcTranslationUnit, "9677dee0-c0e5-46a1-8b40-3db3168be63d")
 struct IDxcTranslationUnit : public IUnknown
 {
-  virtual HRESULT STDMETHODCALLTYPE GetCursor(_Out_ IDxcCursor** pCursor) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetCursor(_COM_Outptr_ IDxcCursor** pCursor) = 0;
   virtual HRESULT STDMETHODCALLTYPE Tokenize(
     _In_ IDxcSourceRange* range,
     _Outptr_result_buffer_maybenull_(*pTokenCount) IDxcToken*** pTokens,
