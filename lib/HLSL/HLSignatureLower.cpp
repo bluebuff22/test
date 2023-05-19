@@ -241,6 +241,11 @@ void HLSignatureLower::ProcessArgument(Function *func,
   unsigned rows, cols;
   HLModule::GetParameterRowsAndCols(Ty, rows, cols, paramAnnotation);
   CompType EltTy = paramAnnotation.GetCompType();
+  if (EltTy.IsInvalid()){
+    dxilutil::EmitErrorOnFunction(HLM.GetModule()->getContext(), func,
+        "Invalid kind for signature element");
+    return;
+  }
   DXIL::InterpolationMode interpMode =
       paramAnnotation.GetInterpolationMode().GetKind();
 
@@ -1144,10 +1149,12 @@ void HLSignatureLower::GenerateDxilInputsOutputs(DXIL::SignatureKind SK) {
       bI1Cast = true;
       Ty = i32Ty;
     }
-    if (!hlslOP->IsOverloadLegal(opcode, Ty)) {
+    if (!Ty || !hlslOP->IsOverloadLegal(opcode, Ty)) {
       std::string O;
       raw_string_ostream OSS(O);
-      Ty->print(OSS);
+      if (Ty)
+        Ty->print(OSS);
+
       OSS << "(type for " << SE->GetName() << ")";
       OSS << " cannot be used as shader inputs or outputs.";
       OSS.flush();

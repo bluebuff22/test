@@ -107,6 +107,53 @@ bool IsHLSLNumericOrAggregateOfNumericType(clang::QualType type) {
   return BuiltinTy != nullptr && BuiltinTy->getKind() != BuiltinType::Kind::Char_S;
 }
 
+static bool IsMatchInType(QualType type, std::function<bool(QualType)> matchFn,
+                          SourceLocation *locOut = nullptr) {
+  while (true) {
+    type = QualType(type->getUnqualifiedDesugaredType(), 0);
+    if (type->isReferenceType() || type->isPointerType())
+      type = type->getPointeeType();
+    else if (const ArrayType *AT = dyn_cast<ArrayType>(type))
+      type = AT->getElementType();
+    else
+      break;
+  }
+
+  if (matchFn(type))
+    return true;
+
+  if (const CXXRecordDecl *RD = type->getAsCXXRecordDecl()) {
+    // struct or class
+    for (const FieldDecl *FD : RD->fields()) {
+      if (IsMatchInType(FD->getType(), matchFn, locOut)) {
+        if (locOut && !locOut->isValid())
+          *locOut = FD->getLocation();
+        return true;
+      }
+    }
+    for (const CXXBaseSpecifier &BS : RD->bases()) {
+      if (IsMatchInType(BS.getType(), matchFn, locOut))
+        return true;
+    }
+  } else if (const RecordType *RT = type->getAsUnionType()) {
+    // union
+    RecordDecl *RD = RT->getDecl();
+    for (const FieldDecl *FD : RD->fields()) {
+      if (IsMatchInType(FD->getType(), matchFn, locOut)) {
+        if (locOut && !locOut->isValid())
+          *locOut = FD->getLocation();
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+bool ContainsHLSLResourceType(QualType type, SourceLocation *locOut) {
+  return IsMatchInType(type, IsHLSLResourceType, locOut);
+}
+
 bool IsHLSLNumericUserDefinedType(clang::QualType type) {
   const clang::Type *Ty = type.getCanonicalType().getTypePtr();
   if (const RecordType *RT = dyn_cast<RecordType>(Ty)) {
