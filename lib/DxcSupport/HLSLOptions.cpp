@@ -69,6 +69,119 @@ const OptTable * hlsl::options::getHlslOptTable() {
   return g_HlslOptTable;
 }
 
+static std::vector<ArgPair> ComputeArgPairsFromArgList(const llvm::opt::InputArgList &argList) {
+  std::vector<ArgPair> ret;
+
+  for (llvm::opt::Arg *arg : argList) {
+    llvm::StringRef name = arg->getOption().getName();
+    llvm::StringRef value;
+
+    llvm::SmallString<64> argumentStorage; // Buffer for when we need to concatenate things.
+
+    // The input argument should be excluded from this list. All the uses for
+    // the ArgPair list used to manually filter out the input file. Do it here
+    // in the source instead.
+    if (arg->getOption().getKind() == llvm::opt::Option::InputClass) {
+      continue;
+    }
+    // This is a flag without value, like -Zi, or -Od
+    else if (arg->getOption().getKind() == llvm::opt::Option::FlagClass) {
+      assert(arg->getNumValues() == 0);
+    }
+    else if (arg->getNumValues() == 1) {
+      value = arg->getValue();
+      // If the argument must be merged (eg. -Wx, where W is the option and x is
+      // the value), merge them right now.
+      if (arg->getOption().getKind() == llvm::opt::Option::JoinedClass) {
+        argumentStorage.append(name);
+        argumentStorage.append(value);
+
+        name = argumentStorage;
+        value = "";
+      }
+    }
+    else if (arg->getOption().getKind() == Option::CommaJoinedClass) {
+      //
+      // CommaJoinedClass takes the following form:
+      //  -MyArg=Value0,Value1,Value2,Value3
+      //
+      // Much like JoinedClass, it gets folded into the name.
+      //
+      //  { "MyArg=Value0,Value1,Value2,Value3", "" }
+      argumentStorage += name;
+      for (unsigned i = 0; i < arg->getNumValues(); i++) {
+        const char *valuePtr = arg->getValue(i);
+        if (i > 0)
+          argumentStorage += ",";
+        argumentStorage += valuePtr;
+      }
+      name = argumentStorage;
+      value = "";
+    }
+
+    // This type of arg takes the following form:
+    //  -arg Value0 Value1 Value2
+    //
+    // To preserve the arg correctly, we must represent it as the following:
+    //   { "arg", "" }
+    //   { "",    "Value0" }
+    //   { "",    "Value1" }
+    //   { "",    "Value2" }
+    // 
+    // ..Which is not ideal, since the whole point of arg pair is to easily break down what arg is part of what.
+    // 
+    // Alternative is to try this:
+    //   { "arg", "Value0 Value1 Value2" }
+    //
+    // But this causes problem when recompiling because the argument parser
+    // does not handle the spaces correctly. When testing with the folling args:
+    //
+    //   "-arg" "Value0 Value1" "-arg" "Value2 Value3"
+    //
+    // The arg parser interpreted it as:
+    //
+    //   "-arg" : { "Value0", "Value1", "-arg", "Value2", "Value3" }
+    //
+    else if (arg->getOption().getKind() == Option::MultiArgClass) {
+      ArgPair namePair;
+      namePair.Name = name;
+      ret.push_back(std::move(namePair));
+
+      for (const char *valuePtr : arg->getValues()) {
+        ArgPair valuePair;
+        valuePair.Value = valuePtr;
+        ret.push_back(std::move(valuePair));
+      }
+      continue; // We've added the arg specially, skip the normal stuff.
+    }
+    else {
+      // This code path is now exercised on every compilation and arg parse with HLSLOptions,
+      // so if we ever add some other types of arg class, we'll hit this.
+      llvm::report_fatal_error(llvm::Twine("Unknown argument type ") + llvm::Twine(arg->getOption().getKind()));
+    }
+
+    ArgPair argPair;
+    argPair.Name = name;
+    argPair.Value = value;
+
+    ret.push_back(std::move(argPair));
+  }
+
+  return ret;
+}
+
+std::vector<ArgPair> hlsl::options::ComputeArgPairsFromRawArgs(llvm::ArrayRef<const char *> args) {
+  const llvm::opt::OptTable *optionTable = hlsl::options::getHlslOptTable();
+  assert(optionTable);
+  if (optionTable) {
+    unsigned missingIndex = 0;
+    unsigned missingCount = 0;
+    llvm::opt::InputArgList argList = optionTable->ParseArgs(args, missingIndex, missingCount);
+    return ComputeArgPairsFromArgList(argList);
+  }
+  return std::vector<ArgPair>();
+}
+
 void DxcDefines::push_back(llvm::StringRef value) {
   // Skip empty defines.
   if (value.size() > 0) {
@@ -447,8 +560,9 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
     }
   }
 
-  // Add macros from the command line.
+  opts.ArgPairs = ComputeArgPairsFromArgList(Args);
 
+  // Add macros from the command line.
   for (const Arg *A : Args.filtered(OPT_D)) {
     opts.Defines.push_back(A->getValue());
     // If supporting OPT_U and included in filter, handle undefs.

@@ -146,6 +146,8 @@ public:
   TEST_METHOD(CompileThenTestPdbUtilsStripped)
   TEST_METHOD(CompileThenTestPdbUtilsEmptyEntry)
   TEST_METHOD(CompileThenTestPdbUtilsRelativePath)
+  TEST_METHOD(CompileSameFilenameAndEntryThenTestPdbUtilsArgs)
+  TEST_METHOD(CompileMultiArgClassRecompile)
   TEST_METHOD(CompileWithRootSignatureThenStripRootSignature)
   TEST_METHOD(CompileThenSetRootSignatureThenValidate)
   TEST_METHOD(CompileSetPrivateThenWithStripPrivate)
@@ -1869,6 +1871,222 @@ TEST_F(CompilerTest, CompileThenTestPdbUtilsWarningOpt) {
 
   VERIFY_SUCCEEDED(pPdbUtils->Load(pPdb));
   TestPdb(pPdbUtils);
+}
+
+TEST_F(CompilerTest, CompileMultiArgClassRecompile) {
+  // This test is to make sure Comma Joined and MultiArg argument class
+  // work with PDBs.
+  // Arguments like:
+  // 
+  //  -opt-select test0 test1 -opt-select test2 test 3
+  // 
+  // and:
+  //  -CommaJoinTest=Value0,Value1,Value2,Value3
+  //  -CommaJoinTestNoEqual=Value0,Value1,Value2,Value3
+  //
+  // Can be stored correctly in PDBs and when used to recompile, can be
+  // verified to still exist in the next PDB.
+
+
+  CComPtr<IDxcCompiler> pCompiler;
+  VERIFY_SUCCEEDED(CreateCompiler(&pCompiler));
+
+  std::wstring shader = LR"x(
+    [RootSignature("")] float PSMain() : SV_Target {
+      return 0;
+    }
+  )x";
+
+  CComPtr<IDxcUtils> pUtils;
+  VERIFY_SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils)));
+
+
+  CComPtr<IDxcBlobEncoding> pShaderBlob;
+  VERIFY_SUCCEEDED(pUtils->CreateBlob(shader.data(), shader.size() * sizeof(shader[0]), DXC_CP_UTF16, &pShaderBlob));
+
+  std::wstring CommaJoinArg0 = L"-CommaJoinTest=Value0,Value1,Value2,Value3";
+  std::wstring CommaJoinArg1 = L"-CommaJoinTestNoEqual=Value0,Value1,Value2,Value3";
+
+  const WCHAR *args[] = {
+    L"-Od",
+    L"-Zi",
+    CommaJoinArg0.c_str(),
+    CommaJoinArg1.c_str(),
+    L"-opt-select", L"test0", L"test1",
+    L"-opt-select", L"test2", L"test3",
+  };
+
+  CComPtr<IDxcOperationResult> pOpResult;
+  VERIFY_SUCCEEDED(pCompiler->Compile(pShaderBlob, L"MyShader.hlsl", L"PSMain", L"ps_6_0", args, _countof(args), nullptr, 0, nullptr, &pOpResult));
+
+  auto GetArgPtrs = [this](llvm::ArrayRef<std::wstring> Args) -> std::vector<const WCHAR *> {
+    std::vector<const WCHAR *> ret;
+    for (const std::wstring &Arg : Args)
+      ret.push_back(Arg.c_str());
+    return ret;
+  };
+
+  auto GetPdbLikeResults = [this](IDxcOperationResult *pOpResult) -> std::vector<CComPtr<IDxcBlob> > {
+    HRESULT compileStatus = S_OK;
+    VERIFY_SUCCEEDED(pOpResult->GetStatus(&compileStatus));
+    VERIFY_SUCCEEDED(compileStatus);
+
+    CComPtr<IDxcResult> pResult;
+    CComPtr<IDxcBlob> pDxil;
+    VERIFY_SUCCEEDED(pOpResult->GetResult(&pDxil));
+    VERIFY_SUCCEEDED(pOpResult->QueryInterface(&pResult));
+    CComPtr<IDxcBlob> pPdb;
+    VERIFY_SUCCEEDED(pResult->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pPdb), nullptr));
+
+    std::vector<CComPtr<IDxcBlob> > ret;
+    ret.push_back(pDxil);
+    ret.push_back(pPdb);
+    return ret;
+  };
+
+  auto RenderArgsFromPdbUtilsArgPairs = [this](IDxcPdbUtils2 *pPdbUtils) -> std::vector<std::wstring> {
+    std::vector<std::wstring> Args;
+    UINT uNumArgPairs = 0;
+    VERIFY_SUCCEEDED(pPdbUtils->GetArgPairCount(&uNumArgPairs));
+    for (UINT i = 0; i < uNumArgPairs; i++) {
+      CComPtr<IDxcBlobWide> pName;
+      CComPtr<IDxcBlobWide> pValue;
+      VERIFY_SUCCEEDED(pPdbUtils->GetArgPair(i, &pName, &pValue));
+
+      if (pName && pName->GetStringLength()) {
+        Args.push_back(std::wstring(L"-") + std::wstring(pName->GetStringPointer(), pName->GetStringLength()));
+      }
+      if (pValue && pValue->GetStringLength()) {
+        Args.push_back(std::wstring(pValue->GetStringPointer(), pValue->GetStringLength()));
+      }
+    }
+    return Args;
+  };
+
+  auto CompileAndVerify =
+    [this, pCompiler,
+    &shader, &CommaJoinArg0, &CommaJoinArg1,
+    GetArgPtrs, RenderArgsFromPdbUtilsArgPairs, GetPdbLikeResults]
+
+  (llvm::ArrayRef<std::wstring> Args) {
+    std::vector<const WCHAR *> ArgPtrs = GetArgPtrs(Args);
+
+    CComPtr<IDxcCompiler3> pCompiler3;
+    VERIFY_SUCCEEDED(pCompiler.QueryInterface(&pCompiler3));
+
+    DxcBuffer RecompileBuf = {};
+    RecompileBuf.Ptr = shader.c_str();
+    RecompileBuf.Size = shader.size() * sizeof(shader[0]);
+    RecompileBuf.Encoding = DXC_CP_UTF16;
+
+    CComPtr<IDxcResult> pRecompileResult;
+    VERIFY_SUCCEEDED(pCompiler3->Compile(&RecompileBuf, ArgPtrs.data(), ArgPtrs.size(), nullptr, IID_PPV_ARGS(&pRecompileResult)));
+
+    std::vector<CComPtr<IDxcBlob> > PdbLikes = GetPdbLikeResults(pRecompileResult);
+    for (IDxcBlob *pRecompiledObj : PdbLikes) {
+      CComPtr<IDxcPdbUtils2> pRecompiledPdbUtils;
+      VERIFY_SUCCEEDED(DxcCreateInstance(CLSID_DxcPdbUtils, IID_PPV_ARGS(&pRecompiledPdbUtils)));
+      VERIFY_SUCCEEDED(pRecompiledPdbUtils->Load(pRecompiledObj));
+
+      std::vector<std::wstring> RecompiledArgs = RenderArgsFromPdbUtilsArgPairs(pRecompiledPdbUtils);
+      VERIFY_ARE_EQUAL(Args.size(), RecompiledArgs.size());
+      int OptSelCount = 0;
+      int CommaJoin0Count = 0;
+      int CommaJoin1Count = 0;
+      for (unsigned i = 0; i < RecompiledArgs.size(); i++) {
+        if (RecompiledArgs[i] == L"-opt-select")
+          OptSelCount++;
+        else if (RecompiledArgs[i] == CommaJoinArg0)
+          CommaJoin0Count++;
+        else if (RecompiledArgs[i] == CommaJoinArg1)
+          CommaJoin1Count++;
+
+        VERIFY_ARE_EQUAL(RecompiledArgs[i], Args[i]);
+      }
+      VERIFY_ARE_EQUAL(OptSelCount, 2);
+      VERIFY_ARE_EQUAL(CommaJoin0Count, 1);
+      VERIFY_ARE_EQUAL(CommaJoin1Count, 1);
+    }
+
+  };
+
+  std::vector<CComPtr<IDxcBlob> > PdbLikes = GetPdbLikeResults(pOpResult);
+  for (IDxcBlob *pPdbLike : PdbLikes) {
+    CComPtr<IDxcPdbUtils2> pPdbUtils;
+    VERIFY_SUCCEEDED(DxcCreateInstance(CLSID_DxcPdbUtils, IID_PPV_ARGS(&pPdbUtils)));
+    VERIFY_SUCCEEDED(pPdbUtils->Load(pPdbLike));
+
+    {
+      std::vector<std::wstring> Args = RenderArgsFromPdbUtilsArgPairs(pPdbUtils);
+      CompileAndVerify(Args);
+    }
+
+    {
+      std::vector<std::wstring> Args;
+      UINT uNumArgs = 0;
+      VERIFY_SUCCEEDED(pPdbUtils->GetArgCount(&uNumArgs));
+      for (UINT i = 0; i < uNumArgs; i++) {
+        CComPtr<IDxcBlobWide> pArg;
+        VERIFY_SUCCEEDED(pPdbUtils->GetArg(i, &pArg));
+        Args.push_back(std::wstring(pArg->GetStringPointer(), pArg->GetStringLength()));
+      }
+      CompileAndVerify(Args);
+    }
+  }
+}
+
+TEST_F(CompilerTest, CompileSameFilenameAndEntryThenTestPdbUtilsArgs) {
+  // This is a regression test for a bug where if entry point has the same
+  // value as the input filename, the entry point gets omitted from the arg
+  // list in debug module and PDB, making them useless for recompilation.
+  CComPtr<IDxcCompiler> pCompiler;
+  VERIFY_SUCCEEDED(CreateCompiler(&pCompiler));
+
+  std::wstring shader = LR"x(
+    [RootSignature("")] float PSMain() : SV_Target {
+      return 0;
+    }
+  )x";
+
+  CComPtr<IDxcUtils> pUtils;
+  VERIFY_SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils)));
+
+  CComPtr<IDxcOperationResult> pOpResult;
+
+  std::wstring EntryPoint = L"PSMain";
+  CComPtr<IDxcBlobEncoding> pShaderBlob;
+  VERIFY_SUCCEEDED(pUtils->CreateBlob(shader.data(), shader.size() * sizeof(shader[0]), DXC_CP_UTF16, &pShaderBlob));
+  const WCHAR *args[] = {
+    L"-Od",
+    L"-Zi",
+  };
+  VERIFY_SUCCEEDED(pCompiler->Compile(pShaderBlob, EntryPoint.c_str(), EntryPoint.c_str(), L"ps_6_0", args, _countof(args), nullptr, 0, nullptr, &pOpResult));
+
+  HRESULT compileStatus = S_OK;
+  VERIFY_SUCCEEDED(pOpResult->GetStatus(&compileStatus));
+  VERIFY_SUCCEEDED(compileStatus);
+
+  CComPtr<IDxcBlob> pDxil;
+  VERIFY_SUCCEEDED(pOpResult->GetResult(&pDxil));
+  CComPtr<IDxcResult> pResult;
+  VERIFY_SUCCEEDED(pOpResult.QueryInterface(&pResult));
+  CComPtr<IDxcBlob> pPdb;
+  VERIFY_SUCCEEDED(pResult->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pPdb), nullptr));
+
+  IDxcBlob *PdbLikes[] = {
+    pDxil, pPdb,
+  };
+
+  for (IDxcBlob *pPdbLike : PdbLikes) {
+    CComPtr<IDxcPdbUtils2> pPdbUtils;
+    VERIFY_SUCCEEDED(DxcCreateInstance(CLSID_DxcPdbUtils, IID_PPV_ARGS(&pPdbUtils)));
+    VERIFY_SUCCEEDED(pPdbUtils->Load(pPdbLike));
+
+    CComPtr<IDxcBlobWide> pEntryPoint;
+    VERIFY_SUCCEEDED(pPdbUtils->GetEntryPoint(&pEntryPoint));
+    VERIFY_IS_NOT_NULL(pEntryPoint);
+    VERIFY_ARE_EQUAL(std::wstring(pEntryPoint->GetStringPointer(), pEntryPoint->GetStringLength()), EntryPoint);
+  }
 }
 
 TEST_F(CompilerTest, CompileThenTestPdbInPrivate) {
