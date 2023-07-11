@@ -140,16 +140,38 @@ TEST_F(FileTest, StructuredByteBufferArray) {
   setBeforeHLSLLegalization();
   runFileTest("type.structured-buffer.array.hlsl");
 }
-TEST_F(FileTest, StructuredBufferArrayError) {
-  runFileTest("type.structured-buffer.array.error.hlsl", Expect::Failure);
+TEST_F(FileTest, RWStructuredBufferArrayNoCounter) {
+  runFileTest("type.rwstructured-buffer.array.nocounter.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayNoCounterFlattened) {
+  runFileTest("type.rwstructured-buffer.array.nocounter.flatten.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayCounter) {
+  runFileTest("type.rwstructured-buffer.array.counter.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferUnboundedArrayCounter) {
+  runFileTest("type.rwstructured-buffer.unbounded.array.counter.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayCounterConstIndex) {
+  runFileTest("type.rwstructured-buffer.array.counter.const.index.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayCounterFlattened) {
+  runFileTest("type.rwstructured-buffer.array.counter.flatten.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayCounterIndirect) {
+  runFileTest("type.rwstructured-buffer.array.counter.indirect.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayCounterIndirect2) {
+  runFileTest("type.rwstructured-buffer.array.counter.indirect2.hlsl");
+}
+TEST_F(FileTest, RWStructuredBufferArrayBindAttributes) {
+  runFileTest("type.rwstructured-buffer.array.binding.attributes.hlsl");
 }
 TEST_F(FileTest, AppendStructuredBufferArrayError) {
-  runFileTest("type.append-structured-buffer.array.error.hlsl",
-              Expect::Failure);
+  runFileTest("type.append-structured-buffer.array.hlsl");
 }
 TEST_F(FileTest, ConsumeStructuredBufferArrayError) {
-  runFileTest("type.consume-structured-buffer.array.error.hlsl",
-              Expect::Failure);
+  runFileTest("type.consume-structured-buffer.array.hlsl");
 }
 TEST_F(FileTest, AppendConsumeStructuredBufferTypeCast) {
   runFileTest("type.append.consume-structured-buffer.cast.hlsl");

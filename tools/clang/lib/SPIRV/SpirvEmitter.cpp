@@ -323,6 +323,10 @@ const DeclaratorDecl *getReferencedDef(const Expr *expr) {
     return nullptr;
 
   expr = expr->IgnoreParenCasts();
+  while (const auto *arraySubscriptExpr = dyn_cast<ArraySubscriptExpr>(expr)) {
+    expr = arraySubscriptExpr->getBase();
+    expr = expr->IgnoreParenCasts();
+  }
 
   if (const auto *declRefExpr = dyn_cast<DeclRefExpr>(expr)) {
     return dyn_cast_or_null<DeclaratorDecl>(declRefExpr->getDecl());
@@ -1729,21 +1733,6 @@ void SpirvEmitter::doVarDecl(const VarDecl *decl) {
     emitError("externally initialized non-floating-point column-major "
               "matrices not supported yet",
               loc);
-  }
-
-  // Reject arrays of RW/append/consume structured buffers. They have assoicated
-  // counters, which are quite nasty to handle.
-  if (decl->getType()->isArrayType()) {
-    auto type = decl->getType();
-    do {
-      type = type->getAsArrayTypeUnsafe()->getElementType();
-    } while (type->isArrayType());
-
-    if (isRWAppendConsumeSBuffer(type)) {
-      emitError("arrays of RW/append/consume structured buffers unsupported",
-                loc);
-      return;
-    }
   }
 
   if (decl->hasAttr<VKConstantIdAttr>()) {
@@ -4528,16 +4517,15 @@ SpirvEmitter::incDecRWACSBufferCounter(const CXXMemberCallExpr *expr,
     (void)doExpr(object);
   }
 
-  const auto *counterPair = getFinalACSBufferCounter(object);
-  if (!counterPair) {
+  auto *counter = getFinalACSBufferCounterInstruction(object);
+  if (!counter) {
     emitFatalError("cannot find the associated counter variable",
                    object->getExprLoc());
     return nullptr;
   }
 
-  auto *counterPtr = spvBuilder.createAccessChain(
-      astContext.IntTy, counterPair->get(spvBuilder, spvContext), {zero},
-      srcLoc, srcRange);
+  auto *counterPtr = spvBuilder.createAccessChain(astContext.IntTy, counter,
+                                                  {zero}, srcLoc, srcRange);
 
   SpirvInstruction *index = nullptr;
   if (isInc) {
@@ -4575,13 +4563,13 @@ bool SpirvEmitter::tryToAssignCounterVar(const DeclaratorDecl *dstDecl,
   // Handle AssocCounter#1 (see CounterVarFields comment)
   if (const auto *dstPair =
           declIdMapper.createOrGetCounterIdAliasPair(dstDecl)) {
-    const auto *srcPair = getFinalACSBufferCounter(srcExpr);
-    if (!srcPair) {
+    auto *srcCounter = getFinalACSBufferCounterInstruction(srcExpr);
+    if (!srcCounter) {
       emitFatalError("cannot find the associated counter variable",
                      srcExpr->getExprLoc());
       return false;
     }
-    dstPair->assign(*srcPair, spvBuilder, spvContext);
+    dstPair->assign(srcCounter, spvBuilder);
     return true;
   }
 
@@ -4612,18 +4600,18 @@ bool SpirvEmitter::tryToAssignCounterVar(const Expr *dstExpr,
   dstExpr = dstExpr->IgnoreParenCasts();
   srcExpr = srcExpr->IgnoreParenCasts();
 
-  const auto *dstPair = getFinalACSBufferCounter(dstExpr);
-  const auto *srcPair = getFinalACSBufferCounter(srcExpr);
+  auto *dstCounter = getFinalACSBufferCounterAliasAddressInstruction(dstExpr);
+  auto *srcCounter = getFinalACSBufferCounterInstruction(srcExpr);
 
-  if ((dstPair == nullptr) != (srcPair == nullptr)) {
+  if ((dstCounter == nullptr) != (srcCounter == nullptr)) {
     emitFatalError("cannot handle associated counter variable assignment",
                    srcExpr->getExprLoc());
     return false;
   }
 
   // Handle AssocCounter#1 & AssocCounter#2
-  if (dstPair && srcPair) {
-    dstPair->assign(*srcPair, spvBuilder, spvContext);
+  if (dstCounter && srcCounter) {
+    spvBuilder.createStore(dstCounter, srcCounter, /* SourceLocation */ {});
     return true;
   }
 
@@ -4639,6 +4627,36 @@ bool SpirvEmitter::tryToAssignCounterVar(const Expr *dstExpr,
   }
 
   return false;
+}
+
+SpirvInstruction *SpirvEmitter::getFinalACSBufferCounterAliasAddressInstruction(
+    const Expr *expr) {
+  const CounterIdAliasPair *counter = getFinalACSBufferCounter(expr);
+  return (counter ? counter->getAliasAddress() : nullptr);
+}
+
+SpirvInstruction *
+SpirvEmitter::getFinalACSBufferCounterInstruction(const Expr *expr) {
+  const CounterIdAliasPair *counterPair = getFinalACSBufferCounter(expr);
+  if (!counterPair)
+    return nullptr;
+
+  SpirvInstruction *counter =
+      counterPair->getCounterVariable(spvBuilder, spvContext);
+  const auto srcLoc = expr->getExprLoc();
+
+  // TODO: Call collectArrayStructIndices?
+  llvm::SmallVector<SpirvInstruction *, 2> indexes;
+  if (const auto *arraySubscriptExpr = dyn_cast<ArraySubscriptExpr>(expr)) {
+    // TODO: Handle multi-dimensional arrays.
+    indexes.push_back(doExpr(arraySubscriptExpr->getIdx()));
+  }
+
+  if (!indexes.empty()) {
+    counter = spvBuilder.createAccessChain(spvContext.getACSBufferCounterType(),
+                                           counter, indexes, srcLoc);
+  }
+  return counter;
 }
 
 const CounterIdAliasPair *

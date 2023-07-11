@@ -661,8 +661,14 @@ std::string StageVar::getSemanticStr() const {
   return ss.str();
 }
 
-SpirvInstruction *CounterIdAliasPair::get(SpirvBuilder &builder,
-                                          SpirvContext &spvContext) const {
+SpirvInstruction *CounterIdAliasPair::getAliasAddress() const {
+  assert(isAlias);
+  return counterVar;
+}
+
+SpirvInstruction *
+CounterIdAliasPair::getCounterVariable(SpirvBuilder &builder,
+                                       SpirvContext &spvContext) const {
   if (isAlias) {
     const auto *counterType = spvContext.getACSBufferCounterType();
     const auto *counterVarType =
@@ -689,7 +695,8 @@ bool CounterVarFields::assign(const CounterVarFields &srcFields,
     if (!srcField)
       return false;
 
-    field.counterVar.assign(*srcField, builder, context);
+    field.counterVar.assign(srcField->getCounterVariable(builder, context),
+                            builder);
   }
 
   return true;
@@ -729,7 +736,8 @@ bool CounterVarFields::assign(const CounterVarFields &srcFields,
       if (!srcField)
         return false;
 
-      field.counterVar.assign(*srcField, builder, context);
+      field.counterVar.assign(srcField->getCounterVariable(builder, context),
+                              builder);
       for (uint32_t i = srcPrefix.size(); i < srcIndices.size(); ++i)
         srcIndices.pop_back();
     }
@@ -1687,6 +1695,20 @@ void DeclResultIdMapper::createCounterVar(
   }
 
   const SpirvType *counterType = spvContext.getACSBufferCounterType();
+  QualType declType = decl->getType();
+  if (declType->isArrayType()) {
+    // TODO: Handle multi-dimentional arrays.
+    uint32_t arrayStride = 4;
+    if (const auto *constArrayType =
+            astContext.getAsConstantArrayType(declType)) {
+      counterType = spvContext.getArrayType(
+          counterType, constArrayType->getSize().getZExtValue(), arrayStride);
+    } else {
+      assert(declType->isIncompleteArrayType());
+      counterType = spvContext.getRuntimeArrayType(counterType, arrayStride);
+    }
+  }
+
   // {RW|Append|Consume}StructuredBuffer are all in Uniform storage class.
   // Alias counter variables should be created into the Private storage class.
   const spv::StorageClass sc =
