@@ -90,6 +90,14 @@ namespace clang {
       Gen->HandleCXXStaticMemberVarInstantiation(VD);
     }
 
+    // HLSL Change - begin
+    void UpdateHLSLSemanticDefineAndOptToggles() override {
+      if (CodeGenOpts.HLSLExtensionsCodegen) {
+        CodeGenOpts.HLSLExtensionsCodegen->UpdateSemanticDefinesAndOptToggles();
+      }
+    }
+    // HLSL Change - begin
+
     void Initialize(ASTContext &Ctx) override {
       if (Context) {
         assert(Context == &Ctx);

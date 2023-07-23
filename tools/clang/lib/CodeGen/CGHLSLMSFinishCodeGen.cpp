@@ -3695,17 +3695,8 @@ void StructurizeMultiRet(Module &M, clang::CodeGen::CodeGenModule &CGM,
                          DenseMap<Function *, ScopeInfo> &ScopeMap,
                          bool bWaveEnabledStage,
                          SmallVector<BranchInst *, 16> &DxBreaks) {
-  if (CGM.getCodeGenOpts().HLSLExtensionsCodegen) {
-    if (!CGM.getCodeGenOpts().HLSLExtensionsCodegen->IsOptionEnabled(
-            "structurize-returns"))
-      return;
-  } else {
-    if (!CGM.getCodeGenOpts().HLSLOptimizationToggles.count(
-            "structurize-returns") ||
-        !CGM.getCodeGenOpts()
-             .HLSLOptimizationToggles.find("structurize-returns")
-             ->second)
-      return;
+  if (!CGM.getCodeGenOpts().HLSLIsOptionEnabled(hlsl::options::TOGGLE_STRUCTURIZE_RETURNS)) {
+    return;
   }
 
   for (Function &F : M) {

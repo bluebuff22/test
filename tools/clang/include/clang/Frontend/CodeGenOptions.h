@@ -24,6 +24,7 @@
 #include "dxc/HLSL/HLSLExtensionsCodegenHelper.h" // HLSL change
 #include "dxc/Support/SPIRVOptions.h" // SPIR-V Change
 #include "dxc/DxcBindingTable/DxcBindingTable.h" // HLSL chanhge
+#include "dxc/Support/DxcOptToggles.h" // HLSL Change
 
 namespace clang {
 
@@ -212,6 +213,23 @@ public:
   std::vector<std::string> HLSLArguments;
   /// Helper for generating llvm bitcode for hlsl extensions.
   std::shared_ptr<hlsl::HLSLExtensionsCodegenHelper> HLSLExtensionsCodegen;
+  /// Helper for generating llvm bitcode for hlsl extensions. This member is a
+  /// shared pointer because CodeGenOptions gets copied around many times and
+  /// we want them all to have the same instance of this object.
+  std::shared_ptr<hlsl::options::OptimizationToggles> HLSLOptToggles;
+  /// Helper function to query HLSL optimization toggle.
+  bool HLSLIsOptionEnabled(hlsl::options::Toggle Option) const {
+    return HLSLOptToggles && HLSLOptToggles->Get(Option);
+  }
+  /// Helper function to query whether lifetime-markers are enabled.
+  bool HLSLIsLifetimeMarkersEnabled() const {
+    if (HLSLOptToggles && HLSLOptToggles->Has(hlsl::options::TOGGLE_LIFETIME_MARKERS)) {
+      return HLSLOptToggles->Get(hlsl::options::TOGGLE_LIFETIME_MARKERS);
+    }
+    return HLSLIsLifetimeMarkersEnabledViaCompilerOptions;
+  }
+  /// Whether lifetime marker is enabled via explicit option (as opposed to -opt-enable/disable).
+  bool HLSLIsLifetimeMarkersEnabledViaCompilerOptions = false;
   /// Signature packing mode (0 == default for target)
   unsigned HLSLSignaturePackingStrategy = 0;
   /// denormalized number mode ("ieee" for default)
@@ -229,19 +247,12 @@ public:
   bool HLSLResMayAlias = false;
   /// Lookback scan limit for memory dependencies
   unsigned ScanLimit = 0;
-  // Optimization pass enables, disables and selects
-  std::map<std::string, bool> HLSLOptimizationToggles;
-  std::map<std::string, std::string> HLSLOptimizationSelects;
   /// Debug option to print IR after every pass
   bool HLSLPrintAfterAll = false;
   /// Debug option to print IR after specific pass
   std::set<std::string> HLSLPrintAfter;
   /// Force-replace lifetime intrinsics by zeroinitializer stores.
   bool HLSLForceZeroStoreLifetimes = false;
-  /// Enable lifetime marker generation
-  bool HLSLEnableLifetimeMarkers = false;
-  /// Enable lifetime marker generation only for lifetime.start
-  bool HLSLEnablePartialLifetimeMarkers = false;
   /// Put shader sources and options in the module
   bool HLSLEmbedSourcesInModule = false;
   /// Enable generation of payload access qualifier metadata. 

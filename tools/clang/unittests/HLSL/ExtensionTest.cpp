@@ -1058,28 +1058,141 @@ TEST_F(ExtensionTest, OptionFromDefineStructurizeReturns) {
 
 // Test setting of codegen options from semantic defines
 TEST_F(ExtensionTest, OptionFromDefineLifetimeMarkers) {
-  std::string shader = "\n"
-      "float foo(float a) {\n"
-    "float res[2] = {a, 2 * 2};\n"
-    "return res[a];\n"
-    "}\n"
-  "float4 main(float a : A) : SV_Target { return foo(a); }\n";
+  // Have multiple shaders to test different code paths. There are two
+  // code paths that generate lifetime markers:
+  //  1. During codegen for normal local variables and function arguments. This happens as the top level decls are still being parsed.
+  //  3. During inlining. This happens way later as an optimization pass.
+  // 
+  // Lifetime markers also can be enabled with different means:
+  //  1. normal compilation flags (-enable-lifetime-markers, -disable-lifetime-markers)
+  //  2. shader model (6.6 and above enables it)
+  //  3. -opt-enable, -opt-disable
+  //  4. semantic defines
+  // 
+  // Some combinations of the above used to be broken. This test now tests them all.
+  //
+  std::string shaders[] = {
+    // Inlining
+    R"(
+      float foo(float a) {
+        float res[2] = {a, 2 * 2};
+        return res[a];
+      }
+      float4 main(float a : A) : SV_Target { return foo(a); }
+    )",
 
-  Compiler c(m_dllSupport);
-  c.RegisterSemanticDefine(L"FOO*");
-  c.Compile(shader.data(), {L"/Vd", L"-DFOO_DISABLE_LIFETIME_MARKERS"}, {},
-            L"ps_6_6");
+    // Normal local variables
+    R"(
+      float4 main(float a : A) : SV_Target {
+        float res[2] = {a, 2 * 2};
+        return res[a];
+      }
+    )",
+  };
 
-  std::string disassembly = c.Disassemble();
-  Compiler c2(m_dllSupport);
-  c2.Compile(shader.data(), {L"/Vd", L""}, {}, L"ps_6_6");
-  std::string disassembly2 = c2.Disassemble();
-  // Make sure lifetime marker not exist with FOO_DISABLE_LIFETIME_MARKERS.
-  VERIFY_IS_TRUE(disassembly.find("lifetime") == std::string::npos);
-  VERIFY_IS_TRUE(disassembly.find("FOO_DISABLE_LIFETIME_MARKERS\", !\"1\"") !=
-                 std::string::npos);
-  // Make sure lifetime marker exist by default.
-  VERIFY_IS_TRUE(disassembly2.find("lifetime") != std::string::npos);
+  for (const std::string &shader : shaders) {
+
+    // Test that semantic define can be used to turn off lifetime marker for >= SM6.6
+    {
+      Compiler c(m_dllSupport);
+      c.RegisterSemanticDefine(L"FOO*");
+      c.Compile(shader.data(), {L"/Vd", L"-DFOO_DISABLE_LIFETIME_MARKERS"}, {},
+                L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist with FOO_DISABLE_LIFETIME_MARKERS.
+      VERIFY_IS_TRUE(disassembly.find("@llvm.lifetime") == std::string::npos);
+      VERIFY_IS_TRUE(disassembly.find("FOO_DISABLE_LIFETIME_MARKERS\", !\"1\"") !=
+                     std::string::npos);
+    }
+
+    // Test that semantic define can be used to turn on lifetime marker despite disabled with normal flag.
+    {
+      Compiler c(m_dllSupport);
+      c.RegisterSemanticDefine(L"FOO*");
+      c.Compile(shader.data(), {L"/disable-lifetime-markers", L"/Vd", L"-DFOO_ENABLE_LIFETIME_MARKERS", L"/fcgl"},
+                {},
+                L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist with FOO_DISABLE_LIFETIME_MARKERS.
+      VERIFY_IS_TRUE(disassembly.find("call void @llvm.lifetime") != std::string::npos);
+      VERIFY_IS_TRUE(disassembly.find("FOO_ENABLE_LIFETIME_MARKERS\", !\"1\"") !=
+                     std::string::npos);
+    }
+
+    // Test that semantic define can be used to turn on lifetime marker despite disabled with normal flag.
+    {
+      std::string modifiedShader =
+          std::string("\n#define MY_VAL 1\n") +
+          std::string("\n#define FOO_ENABLE_LIFETIME_MARKERS MY_VAL\n") + shader;
+      Compiler c(m_dllSupport);
+      c.RegisterSemanticDefine(L"FOO*");
+      c.Compile(modifiedShader.data(), {L"/disable-lifetime-markers", L"/Vd", L"/fcgl"},
+                {},
+                L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist with FOO_DISABLE_LIFETIME_MARKERS.
+      VERIFY_IS_TRUE(disassembly.find("call void @llvm.lifetime") != std::string::npos);
+      VERIFY_IS_TRUE(disassembly.find("FOO_ENABLE_LIFETIME_MARKERS\", !\"1\"") !=
+                     std::string::npos);
+    }
+
+    // Test that semantic define can be used to turn off lifetime marker for >= SM6.6
+    {
+      std::string modifiedShader =
+          std::string("\n#define MY_VAL 1\n") +
+          std::string("\n#define FOO_DISABLE_LIFETIME_MARKERS MY_VAL\n") + shader;
+
+      Compiler c(m_dllSupport);
+      c.RegisterSemanticDefine(L"FOO*");
+      c.Compile(modifiedShader.data(), {L"/Vd", }, {},
+                L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist with FOO_DISABLE_LIFETIME_MARKERS.
+      VERIFY_IS_TRUE(disassembly.find("@llvm.lifetime") == std::string::npos);
+      VERIFY_IS_TRUE(disassembly.find("FOO_DISABLE_LIFETIME_MARKERS\", !\"1\"") !=
+                     std::string::npos);
+    }
+
+    // Test that semantic define can be used to turn off lifetime marker for >= SM6.6
+    {
+      Compiler c(m_dllSupport);
+      c.RegisterSemanticDefine(L"FOO*");
+      c.Compile(shader.data(), {L"/Vd", L"-opt-disable", L"lifetime-markers"}, {},
+                L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist
+      VERIFY_IS_TRUE(disassembly.find("@llvm.lifetime") == std::string::npos);
+    }
+
+    // Test that semantic define can be used to turn on lifetime marker despite disabled with normal flag.
+    {
+      Compiler c(m_dllSupport);
+      c.RegisterSemanticDefine(L"FOO*");
+      c.Compile(shader.data(), {L"/disable-lifetime-markers", L"/Vd", L"-opt-enable", L"lifetime-markers"},
+                {},
+                L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist
+      VERIFY_IS_TRUE(disassembly.find("call void @llvm.lifetime") != std::string::npos);
+    }
+
+    // Test that lifetime marker >= SM6.6 is turned on by default
+    {
+      Compiler c(m_dllSupport);
+      c.Compile(shader.data(), {L"/Vd", L""}, {}, L"ps_6_6");
+      std::string disassembly = c.Disassemble();
+
+      // Make sure lifetime marker not exist with FOO_DISABLE_LIFETIME_MARKERS.
+      VERIFY_IS_TRUE(disassembly.find("@llvm.lifetime") != std::string::npos);
+    }
+  }
+
 }
 
 

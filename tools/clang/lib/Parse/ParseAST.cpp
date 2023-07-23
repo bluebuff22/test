@@ -127,6 +127,13 @@ void clang::ParseAST(Sema &S, bool PrintStats, bool SkipFunctionBodies) {
   S.getPreprocessor().EnterMainSourceFile();
   P.Initialize();
 
+  // HLSL Change - begin
+  // After parser is initialized, the semantic defines are ready to be processed.
+  if (S.getLangOpts().HLSL) {
+    Consumer->UpdateHLSLSemanticDefineAndOptToggles();
+  }
+  // HLSL Change - end
+
   // C11 6.9p1 says translation units must have at least one top-level
   // declaration. C++ doesn't have this restriction. We also don't want to
   // complain if we have a precompiled header, although technically if the PCH

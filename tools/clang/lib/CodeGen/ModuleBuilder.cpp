@@ -213,17 +213,10 @@ namespace {
       }
       // HLSL Change Begins.
       if (&Ctx == this->Ctx) {
-        if (Builder) {
+        if (Builder && Builder->getCodeGenOpts().HLSLExtensionsCodegen) {
           // Add semantic defines for extensions if any are available.
-          auto &CodeGenOpts =
-              const_cast<CodeGenOptions &>(Builder->getCodeGenOpts());
-          if (CodeGenOpts.HLSLExtensionsCodegen) {
-            CodeGenOpts.HLSLExtensionsCodegen->WriteSemanticDefines(
-                    M.get());
-            // Builder->CodeGenOpts is a copy. So update it for every Builder.
-            CodeGenOpts.HLSLExtensionsCodegen->UpdateCodeGenOptions(
-                CodeGenOpts);
-          }
+          Builder->getCodeGenOpts().HLSLExtensionsCodegen->WriteSemanticDefines(
+                  M.get());
         }
       }
       // HLSL Change Ends.

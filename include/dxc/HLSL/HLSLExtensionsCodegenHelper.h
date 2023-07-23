@@ -11,6 +11,7 @@
 
 #pragma once
 #include "dxc/DXIL/DxilOperations.h"
+#include "dxc/Support/DxcOptToggles.h"
 #include <vector>
 #include <string>
 
@@ -66,10 +67,9 @@ public:
 
   // Write semantic defines as metadata in the module.
   virtual void WriteSemanticDefines(llvm::Module *M) = 0;
-  virtual void UpdateCodeGenOptions(clang::CodeGenOptions &CGO) = 0;
-  // Query the named option enable
-  // Needed because semantic defines may have set it since options were copied
-  virtual bool IsOptionEnabled(std::string option) = 0;
+  // Reads semantic defines and translates them into opt-enable/opt-disable toggles. This only
+  // works after parser is initialized.
+  virtual void UpdateSemanticDefinesAndOptToggles() = 0;
 
   // Get the name to use for the dxil intrinsic function.
   virtual std::string GetIntrinsicName(unsigned opcode) = 0;
