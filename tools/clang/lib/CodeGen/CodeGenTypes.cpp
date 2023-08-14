@@ -42,7 +42,6 @@ CodeGenTypes::CodeGenTypes(CodeGenModule &cgm)
 
 CodeGenTypes::~CodeGenTypes() {
   llvm::DeleteContainerSeconds(CGRecordLayouts);
-
   for (llvm::FoldingSet<CGFunctionInfo>::iterator
        I = FunctionInfos.begin(), E = FunctionInfos.end(); I != E; )
     delete &*I++;
@@ -54,7 +53,19 @@ void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
   SmallString<256> TypeName;
   llvm::raw_svector_ostream OS(TypeName);
   OS << RD->getKindName() << '.';
-  
+
+  // HLSL Change Begin
+  // Note that this check, like the 'abs' check, shouldn't happen by simple
+  // string comparison; instead we can map the types and functions we
+  // inject and look them up by a simple pointer value check.
+  bool isMatrix =
+      RD->getIdentifier() == &(getContext().Idents.get(StringRef("matrix")));
+
+  if (isMatrix) {
+    OS << "matrix";
+  } else
+  // HLSL Change End
+
   // Name the codegen type after the typedef name
   // if there is no tag type name available
   if (RD->getIdentifier()) {
@@ -80,17 +91,16 @@ void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
   // HLSL Change Starts
 
   const clang::PrintingPolicy &policy = RD->getASTContext().getPrintingPolicy();
-  // Note that this check, like the 'abs' check, shouldn't happen by simple
-  // string comparison; instead we can map the types and functions we
-  // inject and look them up by a simple pointer value check.
-  bool isMatrix = RD->getIdentifier() == &(getContext().Idents.get(StringRef("matrix")));
   if (isMatrix) {
     // Encode additional information into the type.
     const ClassTemplateSpecializationDecl* templateDecl = dyn_cast<ClassTemplateSpecializationDecl>(RD);
     QualType CompType = templateDecl->getTemplateArgs().get(0).getAsType();
     OS  << ".";   CompType.print(OS, policy);
     OS  << "." << templateDecl->getTemplateArgs().get(1).getAsIntegral().toString(10)
-        << "." << templateDecl->getTemplateArgs().get(2).getAsIntegral().toString(10);
+        << "." << templateDecl->getTemplateArgs().get(2).getAsIntegral().toString(10)
+        << "." << ((templateDecl->getTemplateArgs().get(3)
+            .getAsIntegral()
+            .getLimitedValue() == 0) ? "Col" : "Row");
   } else if (const ClassTemplateSpecializationDecl *Spec = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
     const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
     TemplateSpecializationType::PrintTemplateArgumentList(OS,

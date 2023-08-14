@@ -3453,6 +3453,8 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   case ICK_HLSLVector_Scalar:
   case ICK_HLSLVector_Truncation:
   case ICK_HLSLVector_Conversion:
+  case ICK_HLSLColMajorToRowMajor:
+  case ICK_HLSLRowMajorToColMajor:
     From = hlsl::PerformHLSLConversion(this, From, ToType.getUnqualifiedType(), SCS, CCK).get();
     break;
   // HLSL Change Ends

@@ -188,8 +188,7 @@ bool HasHLSLMatOrientation(clang::QualType type, bool *pIsRowMajor) {
 }
 
 bool IsHLSLMatRowMajor(clang::QualType type, bool defaultValue) {
-  bool result = defaultValue;
-  HasHLSLMatOrientation(type, &result);
+  bool result = IsRowMajorMatrixType(type);
   return result;
 }
 
@@ -401,6 +400,50 @@ void GetHLSLMatRowColCount(clang::QualType type, unsigned int &row,
                            unsigned int &col) {
   GetRowsAndColsForAny(type, row, col);
 }
+
+bool IsRowMajorMatrixType(clang::QualType matType) {
+  QualType type = GetStructuralForm(matType);
+  const Type *Ty = type.getCanonicalType().getTypePtr();
+  if (const RecordType *RT = dyn_cast<RecordType>(Ty)) {
+    if (const ClassTemplateSpecializationDecl *templateDecl =
+            dyn_cast<ClassTemplateSpecializationDecl>(
+                RT->getAsCXXRecordDecl())) {
+      if (templateDecl->getName() == "matrix") {
+        const TemplateArgumentList &argList = templateDecl->getTemplateArgs();
+        const TemplateArgument &arg3 = argList[3];
+        return arg3.getAsIntegral().getLimitedValue();
+      }
+    }
+  }
+  return false;
+}
+
+bool IsDefaultOrientationMatrixType(clang::QualType matType) {
+  QualType type = (matType);
+  // Strip AttributedType.
+  {
+    const ReferenceType *RefType = nullptr;
+    const AttributedType *AttrType = nullptr;
+    while ((RefType = dyn_cast<ReferenceType>(type)) ||
+           (AttrType = dyn_cast<AttributedType>(type))) {
+      type =
+          RefType ? RefType->getPointeeType() : AttrType->getEquivalentType();
+    }
+  }
+  if (const auto *TST =
+          type->getAs<TemplateSpecializationType>()) {
+    TemplateName Template = TST->getTemplateName();
+    if (TypeAliasTemplateDecl *TAT = dyn_cast_or_null<TypeAliasTemplateDecl>(
+            Template.getAsTemplateDecl())) {
+      // Default matrix alias use TU as decl context.
+      auto *ND = dyn_cast<NamespaceDecl>(TAT->getDeclContext());
+      return ND == nullptr;
+    }
+  }
+
+  return false;
+}
+
 clang::QualType GetHLSLVecElementType(clang::QualType type) {
   type = GetStructuralForm(type);
 

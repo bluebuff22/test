@@ -32,6 +32,7 @@ namespace clang {
   class CXXMethodDecl;
   class CXXRecordDecl;
   class ClassTemplateDecl;
+  class TypeAliasTemplateDecl;
   class ExtVectorType;
   class FunctionDecl;
   class FunctionTemplateDecl;
@@ -40,6 +41,7 @@ namespace clang {
   class Sema;
   class TypeSourceInfo;
   class TypedefDecl;
+  class DeclContext;
 }
 
 namespace hlsl {
@@ -78,6 +80,12 @@ enum HLSLScalarType {
   HLSLScalarType_float64,
   HLSLScalarType_int8_4packed,
   HLSLScalarType_uint8_4packed
+};
+
+enum HLSLMatrixOrientation {
+  ColumnMajor = 0,
+  RowMajor,
+  Default,
 };
 
 HLSLScalarType MakeUnsigned(HLSLScalarType T);
@@ -307,7 +315,10 @@ ParamModFromAttributeList(_In_opt_ clang::AttributeList *pAttributes);
 void AddHLSLMatrixTemplate(
   clang::ASTContext& context,
   _In_ clang::ClassTemplateDecl* vectorTemplateDecl,
-  _Outptr_ clang::ClassTemplateDecl** matrixTemplateDecl);
+  _Outptr_ clang::ClassTemplateDecl** matrixTemplateDecl,
+  _Outptr_ clang::TypeAliasTemplateDecl **defaultMatrixAliasDecl,
+  _Outptr_ clang::TypeAliasTemplateDecl **rowMajorMatrixAliasDecl,
+  _Outptr_ clang::TypeAliasTemplateDecl **columnMajorMatrixAliasDecl);
 
 void AddHLSLVectorTemplate(
   clang::ASTContext& context, 
@@ -367,12 +378,10 @@ clang::FunctionTemplateDecl* CreateFunctionTemplateDecl(
   _In_count_(templateParamNamedDeclsCount) clang::NamedDecl** templateParamNamedDecls,
   size_t templateParamNamedDeclsCount);
 
-clang::TypedefDecl* CreateMatrixSpecializationShorthand(
-  clang::ASTContext& context,
-  clang::QualType matrixSpecialization,
-  HLSLScalarType scalarType,
-  size_t rowCount,
-  size_t colCount);
+clang::TypedefDecl *CreateMatrixSpecializationShorthand(
+    clang::ASTContext &context, clang::QualType matrixSpecialization,
+    HLSLScalarType scalarType, size_t rowCount, size_t colCount,
+    clang::DeclContext *currentDeclContext);
 
 clang::TypedefDecl* CreateVectorSpecializationShorthand(
   clang::ASTContext& context,
@@ -415,6 +424,11 @@ clang::QualType GetHLSLInputPatchElementType(clang::QualType type);
 unsigned GetHLSLInputPatchCount(clang::QualType type);
 clang::QualType GetHLSLOutputPatchElementType(clang::QualType type);
 unsigned GetHLSLOutputPatchCount(clang::QualType type);
+// Apply orientation to matType.
+clang::QualType ApplyOrientationOnHLSLMatrixType(clang::QualType matType,
+                                           bool isRowMajor, clang::Sema &sema);
+bool IsRowMajorMatrixType(clang::QualType matType);
+bool IsDefaultOrientationMatrixType(clang::QualType matType);
 
 bool IsHLSLSubobjectType(clang::QualType type);
 bool GetHLSLSubobjectKind(clang::QualType type, DXIL::SubobjectKind &subobjectKind, 

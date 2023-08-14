@@ -304,11 +304,6 @@ public:
   void MarkLoopStmt(CodeGenFunction &CGF, BasicBlock *loopContinue,
                      BasicBlock *loopExit) override;
   CGHLSLMSHelper::Scope* MarkScopeEnd(CodeGenFunction &CGF) override;
-  bool NeedHLSLMartrixCastForStoreOp(const clang::Decl* TD,
-    llvm::SmallVector<llvm::Value*, 16>& IRCallArgs) override;
-  void EmitHLSLMartrixCastForStoreOp(CodeGenFunction& CGF,
-    SmallVector<llvm::Value*, 16>& IRCallArgs,
-    llvm::SmallVector<clang::QualType, 16>& ArgTys) override;
   /// Get or add constant to the program
   HLCBuffer &GetOrCreateCBuffer(HLSLBufferDecl *D);
 };
@@ -3763,6 +3758,10 @@ static unsigned GetHLOpcode(const Expr *E) {
       return static_cast<unsigned>(HLCastOpcode::ToUnsignedCast);
     else if (fromUnsigned)
       return static_cast<unsigned>(HLCastOpcode::FromUnsignedCast);
+    else if (CE->getCastKind() == CK_HLSLRowMajorToColMajor)
+      return static_cast<unsigned>(HLCastOpcode::RowMatrixToColMatrix);
+    else if (CE->getCastKind() == CK_HLSLColMajorToRowMajor)
+      return static_cast<unsigned>(HLCastOpcode::ColMatrixToRowMatrix);
     else
       return static_cast<unsigned>(HLCastOpcode::DefaultCast);
   }
@@ -3919,7 +3918,14 @@ void CGMSHLSLRuntime::FlattenValToInitList(CodeGenFunction &CGF, SmallVector<Val
       // So the order is match here, just cast to vector.
       unsigned matSize = MatTy.getNumElements();
       bool isRowMajor = hlsl::IsHLSLMatRowMajor(Ty, m_pHLModule->GetHLOptions().bDefaultRowMajor);
-
+      // For col major, the data is in col major, cast it to row major for flattened val.
+      if (!isRowMajor) {
+        // the type for val->gettype will be col major here.
+        val = EmitHLSLMatrixOperationCallImp(
+            Builder, HLOpcodeGroup::HLCast,
+            static_cast<unsigned>(HLCastOpcode::ColMatrixToRowMatrix),
+            val->getType(), {val}, TheModule);
+      }
       HLCastOpcode opcode = isRowMajor ? HLCastOpcode::RowMatrixToVecCast
                                        : HLCastOpcode::ColMatrixToVecCast;
       // Cast to vector.
@@ -4057,38 +4063,30 @@ static void StoreInitListToDestPtr(Value *DestPtr,
     Builder.CreateStore(Result, DestPtr);
     idx += Ty->getVectorNumElements();
   } else if (HLMatrixType MatTy = HLMatrixType::dyn_cast(Ty)) {
-    bool isRowMajor = hlsl::IsHLSLMatRowMajor(Type, bDefaultRowMajor);
     std::vector<Value *> matInitList(MatTy.getNumElements());
+    // The init list value is in row major.
+    // The output value is based on MatTy.
     for (unsigned c = 0; c < MatTy.getNumColumns(); c++) {
       for (unsigned r = 0; r < MatTy.getNumRows(); r++) {
-        unsigned matIdx = c * MatTy.getNumRows() + r;
-        matInitList[matIdx] = elts[idx + matIdx];
+        // Data in init list is always row major.
+        unsigned initIdx = MatTy.getRowMajorIndex(r, c);
+        unsigned matIdx =
+            MatTy.getIsRowMajor() ? initIdx : MatTy.getColumnMajorIndex(r, c);
+        matInitList[matIdx] = elts[idx + initIdx];
       }
     }
     idx += MatTy.getNumElements();
     Value *matVal =
         EmitHLSLMatrixOperationCallImp(Builder, HLOpcodeGroup::HLInit,
                                        /*opcode*/ 0, Ty, matInitList, M);
-    // matVal return from HLInit is row major.
-    // If DestPtr is row major, just store it directly.
-    if (!isRowMajor) {
-      // ColMatStore need a col major value.
-      // Cast row major matrix into col major.
-      // Then store it.
-      Value *colMatVal = EmitHLSLMatrixOperationCallImp(
-          Builder, HLOpcodeGroup::HLCast,
-          static_cast<unsigned>(HLCastOpcode::RowMatrixToColMatrix), Ty,
-          {matVal}, M);
-      EmitHLSLMatrixOperationCallImp(
-          Builder, HLOpcodeGroup::HLMatLoadStore,
-          static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatStore), Ty,
-          {DestPtr, colMatVal}, M);
-    } else {
-      EmitHLSLMatrixOperationCallImp(
-          Builder, HLOpcodeGroup::HLMatLoadStore,
-          static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatStore), Ty,
-          {DestPtr, matVal}, M);
-    }
+    EmitHLSLMatrixOperationCallImp(
+        Builder, HLOpcodeGroup::HLMatLoadStore,
+        static_cast<unsigned>(MatTy.getIsRowMajor()
+                                  ? HLMatLoadStoreOpcode::RowMatStore
+                                  : HLMatLoadStoreOpcode::ColMatStore),
+        Ty,
+        {DestPtr, matVal}, M);
+
   } else if (Ty->isStructTy()) {
     if (dxilutil::IsHLSLObjectType(Ty)) {
       Builder.CreateStore(elts[idx], DestPtr);
@@ -4324,8 +4322,19 @@ Value *CGMSHLSLRuntime::EmitHLSLInitListExpr(CodeGenFunction &CGF, InitListExpr 
   } else {
     // Must be matrix here.
     DXASSERT(IsHLSLMatType(ResultTy), "must be matrix type here.");
+    SmallVector<Value *, 4> MatEltValList(EltValList.size());
+    auto MatTy = HLMatrixType::cast(RetTy);
+    // Change back to column major if need.
+    for (unsigned r = 0; r < MatTy.getNumRows(); ++r) {
+      for (unsigned c = 0; c < MatTy.getNumColumns(); ++c) {
+        unsigned RowIdx = MatTy.getRowMajorIndex(r, c);
+        unsigned Idx =
+            MatTy.getIsRowMajor() ? RowIdx : MatTy.getColumnMajorIndex(r, c);
+        MatEltValList[Idx] = EltValList[RowIdx];
+      }
+    }
     return EmitHLSLMatrixOperationCallImp(CGF.Builder, HLOpcodeGroup::HLInit,
-                                          /*opcode*/ 0, RetTy, EltValList,
+                                          /*opcode*/ 0, RetTy, MatEltValList,
                                           TheModule);
   }
 }
@@ -5037,19 +5046,15 @@ Value *CGMSHLSLRuntime::EmitHLSLMatrixLoad(CGBuilderTy &Builder, Value *Ptr,
       isRowMajor
           ? static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatLoad)
           : static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatLoad);
+  llvm::Type *MatValTy =
+      (Ptr->getType()->getPointerElementType());
 
-  Value *matVal = EmitHLSLMatrixOperationCallImp(
-      Builder, HLOpcodeGroup::HLMatLoadStore, opcode,
-      Ptr->getType()->getPointerElementType(), {Ptr}, TheModule);
-  if (!isRowMajor) {
-    // ColMatLoad will return a col major matrix.
-    // All matrix Value should be row major.
-    // Cast it to row major.
-    matVal = EmitHLSLMatrixOperationCallImp(
-        Builder, HLOpcodeGroup::HLCast,
-        static_cast<unsigned>(HLCastOpcode::ColMatrixToRowMatrix),
-        matVal->getType(), {matVal}, TheModule);
-  }
+  DXASSERT(isRowMajor == hlsl::HLMatrixType::cast(MatValTy).getIsRowMajor(),
+           "orientation mismatch");
+  Value *matVal =
+      EmitHLSLMatrixOperationCallImp(Builder, HLOpcodeGroup::HLMatLoadStore,
+                                     opcode, MatValTy, {Ptr}, TheModule);
+
   return matVal;
 }
 void CGMSHLSLRuntime::EmitHLSLMatrixStore(CGBuilderTy &Builder, Value *Val,
@@ -5060,86 +5065,11 @@ void CGMSHLSLRuntime::EmitHLSLMatrixStore(CGBuilderTy &Builder, Value *Val,
       isRowMajor
           ? static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatStore)
           : static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatStore);
-
-  if (!isRowMajor) {
-    Value *ColVal = nullptr;
-    // If Val is casted from col major. Just use the original col major val.
-    if (CallInst *CI = dyn_cast<CallInst>(Val)) {
-      hlsl::HLOpcodeGroup group =
-          hlsl::GetHLOpcodeGroupByName(CI->getCalledFunction());
-      if (group == HLOpcodeGroup::HLCast) {
-        HLCastOpcode castOp = static_cast<HLCastOpcode>(hlsl::GetHLOpcode(CI));
-        if (castOp == HLCastOpcode::ColMatrixToRowMatrix) {
-          ColVal = CI->getArgOperand(HLOperandIndex::kUnaryOpSrc0Idx);
-        }
-      }
-    }
-    if (ColVal) {
-      Val = ColVal;
-    } else {
-      // All matrix Value should be row major.
-      // ColMatStore need a col major value.
-      // Cast it to row major.
-      Val = EmitHLSLMatrixOperationCallImp(
-          Builder, HLOpcodeGroup::HLCast,
-          static_cast<unsigned>(HLCastOpcode::RowMatrixToColMatrix),
-          Val->getType(), {Val}, TheModule);
-    }
-  }
-
+  DXASSERT(isRowMajor == hlsl::HLMatrixType::cast(Val->getType()).getIsRowMajor(),
+           "orientation mismatch");
+  DXASSERT(DestPtr->getType()->getPointerElementType() == Val->getType(), "Orientation mismatch");
   EmitHLSLMatrixOperationCallImp(Builder, HLOpcodeGroup::HLMatLoadStore, opcode,
                                  Val->getType(), {DestPtr, Val}, TheModule);
-}
-
-bool CGMSHLSLRuntime::NeedHLSLMartrixCastForStoreOp(const clang::Decl* TD,
-  llvm::SmallVector<llvm::Value*, 16>& IRCallArgs) {
-
-  const clang::FunctionDecl* FD = dyn_cast<clang::FunctionDecl>(TD);
-
-  unsigned opcode = 0;
-  StringRef group;
-  if (!hlsl::GetIntrinsicOp(FD, opcode, group))
-    return false;
-
-  if (opcode != (unsigned)hlsl::IntrinsicOp::MOP_Store)
-    return false;
-
-  // Note that the store op is not yet an HL op. It's just a call
-  // to mangled rwbab store function. So adjust the store val position.
-  const unsigned storeValOpIdx = HLOperandIndex::kStoreValOpIdx - 1;
-
-  if (storeValOpIdx >= IRCallArgs.size()) {
-    return false;
-  }
-
-  return HLMatrixType::isa(IRCallArgs[storeValOpIdx]->getType());
-}
-
-void CGMSHLSLRuntime::EmitHLSLMartrixCastForStoreOp(CodeGenFunction& CGF,
-  SmallVector<llvm::Value*, 16>& IRCallArgs,
-  llvm::SmallVector<clang::QualType, 16>& ArgTys) {
-
-  // Note that the store op is not yet an HL op. It's just a call
-  // to mangled rwbab store function. So adjust the store val position.
-  const unsigned storeValOpIdx = HLOperandIndex::kStoreValOpIdx - 1;
-
-  if (storeValOpIdx >= IRCallArgs.size() ||
-    storeValOpIdx >= ArgTys.size()) {
-    return;
-  }
-
-  if (!hlsl::IsHLSLMatType(ArgTys[storeValOpIdx]))
-    return;
-
-  bool isRowMajor =
-    hlsl::IsHLSLMatRowMajor(ArgTys[storeValOpIdx], m_pHLModule->GetHLOptions().bDefaultRowMajor);
-
-  if (!isRowMajor) {
-    IRCallArgs[storeValOpIdx] = EmitHLSLMatrixOperationCallImp(
-      CGF.Builder, HLOpcodeGroup::HLCast,
-      static_cast<unsigned>(HLCastOpcode::RowMatrixToColMatrix),
-      IRCallArgs[storeValOpIdx]->getType(), { IRCallArgs[storeValOpIdx] }, TheModule);
-  }
 }
 
 Value *CGMSHLSLRuntime::EmitHLSLMatrixLoad(CodeGenFunction &CGF, Value *Ptr,
@@ -5919,6 +5849,10 @@ void CGMSHLSLRuntime::EmitHLSLOutParamConversionInit(
       if (!mustCopy && isMatrix) {
         mustCopy = !AreMatrixArrayOrientationMatching(
           CGF.getContext(), *m_pHLModule, argType, ParamTy);
+        if (auto *CE = dyn_cast<ImplicitCastExpr>(Arg)) {
+          mustCopy |= CE->getCastKind() == CK_HLSLRowMajorToColMajor ||
+                      CE->getCastKind() == CK_HLSLColMajorToRowMajor;
+        }
       }
 
       if (!mustCopy) {
@@ -6029,13 +5963,20 @@ void CGMSHLSLRuntime::EmitHLSLOutParamConversionInit(
           outVal = outRVal.getScalarVal();
         } else {
           DXASSERT(argAddr, "should be RV or simple LV");
-          outVal = EmitHLSLMatrixLoad(CGF, argAddr, ArgTy);
+          outVal = EmitHLSLMatrixLoad(CGF, argAddr, argType);
         }
 
         llvm::Type *ToTy = tmpArgAddr->getType()->getPointerElementType();
         if (HLMatrixType::isa(ToTy)) {
-          Value *castVal = CGF.Builder.CreateBitCast(outVal, ToTy);
-          EmitHLSLMatrixStore(CGF, castVal, tmpArgAddr, ParamTy);
+          if (outVal->getType() != ToTy) {
+            outVal = EmitHLSLMatrixOperationCallImp(
+                CGF.Builder, HLOpcodeGroup::HLCast,
+                static_cast<unsigned>(HLMatrixType::cast(ToTy).getIsRowMajor()
+                                          ? HLCastOpcode::ColMatrixToRowMatrix
+                                          : HLCastOpcode::RowMatrixToColMatrix),
+                ToTy, {outVal}, TheModule);
+          }
+          EmitHLSLMatrixStore(CGF, outVal, tmpArgAddr, ParamTy);
         }
         else {
           if (outVal->getType()->isVectorTy()) {
@@ -6106,6 +6047,15 @@ void CGMSHLSLRuntime::EmitHLSLOutParamConversionCopyBack(
             castVal = UndefValue::get(ToTy);
             castVal =
                 CGF.Builder.CreateInsertElement(castVal, outVal, (uint64_t)0);
+          }
+        } else if (HLMatrixType::isa(FromTy) && HLMatrixType::isa(ToTy)) {
+          if (FromTy != ToTy) {
+            castVal = EmitHLSLMatrixOperationCallImp(
+                CGF.Builder, HLOpcodeGroup::HLCast,
+                static_cast<unsigned>(HLMatrixType::cast(ToTy).getIsRowMajor()
+                                          ? HLCastOpcode::ColMatrixToRowMatrix
+                                          : HLCastOpcode::RowMatrixToColMatrix),
+                ToTy, {castVal}, TheModule);
           }
         } else {
           castVal = ConvertScalarOrVector(CGF,
