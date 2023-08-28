@@ -4994,6 +4994,8 @@ public:
     _In_ ExprResult &Cond,
     _In_ ExprResult &LHS,
     _In_ ExprResult &RHS,
+    _In_ ExprValueKind &VK,
+    _In_ ExprObjectKind &OK,
     _In_ SourceLocation QuestionLoc);
 
   clang::QualType ApplyTypeSpecSignToParsedType(
@@ -9687,6 +9689,8 @@ clang::QualType HLSLExternalSource::CheckVectorConditional(
   _In_ ExprResult &Cond,
   _In_ ExprResult &LHS,
   _In_ ExprResult &RHS,
+  _In_ ExprValueKind &VK,
+  _In_ ExprObjectKind &OK,
   _In_ SourceLocation QuestionLoc)
 {
 
@@ -9698,6 +9702,22 @@ clang::QualType HLSLExternalSource::CheckVectorConditional(
   if (Cond.isInvalid() || LHS.isInvalid() || RHS.isInvalid()) {
     return QualType();
   }
+
+  // TBD: Handle LValues instead of always doing RValue cast.
+  VK = VK_RValue;
+  // TBD: Use OK_BitField and OK_VectorComponent when appropriate?
+  OK = OK_Ordinary;
+
+  // Cast condition to RValue
+  if (Cond.get()->isLValue())
+    Cond.set(CreateLValueToRValueCast(Cond.get()));
+
+  // TODO: Is this correct?  Does fxc support lvalue return here?
+  // Cast LHS/RHS to RValue
+  if (LHS.get()->isLValue())
+    LHS.set(CreateLValueToRValueCast(LHS.get()));
+  if (RHS.get()->isLValue())
+    RHS.set(CreateLValueToRValueCast(RHS.get()));
 
   // Gather type info
   QualType condType = GetStructuralForm(Cond.get()->getType());
@@ -9816,10 +9836,6 @@ clang::QualType HLSLExternalSource::CheckVectorConditional(
     ResultTy = ResultTy.getUnqualifiedType();
   }
 
-  // Cast condition to RValue
-  if (Cond.get()->isLValue())
-    Cond.set(CreateLValueToRValueCast(Cond.get()));
-
   // Convert condition component type to bool, using result component dimensions
   QualType boolType;
   // If short-circuiting, condition must be scalar.
@@ -9838,13 +9854,6 @@ clang::QualType HLSLExternalSource::CheckVectorConditional(
       return QualType();
     }
   }
-
-  // TODO: Is this correct?  Does fxc support lvalue return here?
-  // Cast LHS/RHS to RValue
-  if (LHS.get()->isLValue())
-    LHS.set(CreateLValueToRValueCast(LHS.get()));
-  if (RHS.get()->isLValue())
-    RHS.set(CreateLValueToRValueCast(RHS.get()));
 
   if (leftType != ResultTy) {
     StandardConversionSequence standard;
@@ -13987,9 +13996,11 @@ clang::QualType hlsl::CheckVectorConditional(
   _In_ clang::ExprResult &Cond,
   _In_ clang::ExprResult &LHS,
   _In_ clang::ExprResult &RHS,
+  _In_ clang::ExprValueKind &VK,
+  _In_ clang::ExprObjectKind &OK,
   _In_ clang::SourceLocation QuestionLoc)
 {
-  return HLSLExternalSource::FromSema(self)->CheckVectorConditional(Cond, LHS, RHS, QuestionLoc);
+  return HLSLExternalSource::FromSema(self)->CheckVectorConditional(Cond, LHS, RHS, VK, OK, QuestionLoc);
 }
 
 bool IsTypeNumeric(_In_ clang::Sema* self, _In_ clang::QualType &type) {
