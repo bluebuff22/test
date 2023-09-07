@@ -710,6 +710,7 @@ struct ArTypeInfo {
   ArTypeObjectKind ShapeKind;      // The shape of the type (basic, matrix, etc.)
   ArBasicKind EltKind;             // The primitive type of elements in this type.
   const clang::Type *EltTy;        // Canonical element type ptr
+  const clang::Type *ArrayEltTy;   // Canonical array element type ptr
   ArBasicKind ObjKind;             // The object type for this type (textures, buffers, etc.)
   UINT uRows;
   UINT uCols;
@@ -807,32 +808,14 @@ QualType GetOrCreateMatrixSpecialization(ASTContext& context, Sema* sema,
   QualType elementType, uint64_t rowCount, uint64_t colCount)
 {
   DXASSERT_NOMSG(sema);
-
-  TemplateArgument templateArgs[3] = {
-      TemplateArgument(elementType),
-      TemplateArgument(
-          context,
-          llvm::APSInt(
-              llvm::APInt(context.getIntWidth(context.IntTy), rowCount), false),
-          context.IntTy),
-      TemplateArgument(
-          context,
-          llvm::APSInt(
-              llvm::APInt(context.getIntWidth(context.IntTy), colCount), false),
-          context.IntTy)};
-
-  QualType matrixSpecializationType = GetOrCreateTemplateSpecialization(context, *sema, matrixTemplateDecl, ArrayRef<TemplateArgument>(templateArgs));
-
-#ifndef NDEBUG
-  // Verify that we can read the field member from the template record.
-  DXASSERT(matrixSpecializationType->getAsCXXRecordDecl(), 
-           "type of non-dependent specialization is not a RecordType");
-  DeclContext::lookup_result lookupResult = matrixSpecializationType->getAsCXXRecordDecl()->
-    lookup(DeclarationName(&context.Idents.get(StringRef("h"))));
-  DXASSERT(!lookupResult.empty(), "otherwise matrix handle cannot be looked up");
-#endif
-
-  return matrixSpecializationType;
+  QualType I32Ty = context.getIntTypeForBitwidth(32, 1);
+  Expr *rowExpr =
+      IntegerLiteral::Create(context, llvm::APInt(32, rowCount), I32Ty, NoLoc);
+  Expr *colExpr =
+      IntegerLiteral::Create(context, llvm::APInt(32, colCount), I32Ty, NoLoc);
+  return sema->BuildMatrixType(elementType, false,
+                               sema->getLangOpts().HLSLDefaultRowMajor, rowExpr,
+                               colExpr, NoLoc);
 }
 
 /// <summary>Instantiates a new vector type specialization or gets an existing one from the AST.</summary>
@@ -4206,6 +4189,10 @@ public:
     if (type->isPointerType()) {
       return hlsl::IsPointerStringType(type) ? AR_TOBJ_STRING : AR_TOBJ_POINTER;
     }
+
+    if (type->isMatrixType())
+      return AR_TOBJ_MATRIX;
+
     if (type->isDependentType()) {
       return AR_TOBJ_DEPENDENT;
     }
@@ -4249,7 +4236,10 @@ public:
   QualType GetMatrixOrVectorElementType(QualType type)
   {
     type = GetStructuralForm(type);
-
+    if (type->isMatrixType()) {
+      auto *MT = type->getAs<MatrixType>();
+      return MT->getElementType();
+    }
     const CXXRecordDecl* typeRecordDecl = type->getAsCXXRecordDecl();
     DXASSERT_NOMSG(typeRecordDecl);
     const ClassTemplateSpecializationDecl* templateSpecializationDecl = dyn_cast<ClassTemplateSpecializationDecl>(typeRecordDecl);
@@ -4294,7 +4284,16 @@ public:
     }
     return type;
   }
-
+  /// <summary>Given a Clang type, return the QualType for its array element, drilling
+  /// through array only.</summary>
+  QualType GetArrayElementType(QualType type) {
+    type = GetStructuralForm(type);
+    if (type->isArrayType()) {
+      const ArrayType *arrayType = type->getAsArrayTypeUnsafe();
+      type = GetArrayElementType(arrayType->getElementType());
+    }
+    return type;
+  }
   /// <summary>Given a Clang type, return the ArBasicKind classification for its contents.</summary>
   ArBasicKind GetTypeElementKind(QualType type)
   {
@@ -5065,11 +5064,9 @@ public:
       return false;
     }
 
-    bool isMatrix = Template->getCanonicalDecl() ==
-                    m_matrixTemplateDecl->getCanonicalDecl();
     bool isVector = Template->getCanonicalDecl() ==
                     m_vectorTemplateDecl->getCanonicalDecl();
-    bool requireScalar = isMatrix || isVector;
+    bool requireScalar = isVector;
     
     // Check constraints on the type.
     for (unsigned int i = 0; i < TemplateArgList.size(); i++) {
@@ -5087,7 +5084,7 @@ public:
         }
       }
       else if (arg.getKind() == TemplateArgument::ArgKind::Expression) {
-        if (isMatrix || isVector) {
+        if (isVector) {
           Expr *expr = arg.getAsExpr();
           llvm::APSInt constantResult;
           if (expr != nullptr &&
@@ -5099,7 +5096,7 @@ public:
         }
       }
       else if (arg.getKind() == TemplateArgument::ArgKind::Integral) {
-        if (isMatrix || isVector) {
+        if (isVector) {
           llvm::APSInt Val = arg.getAsIntegral();
           if (CheckRangedTemplateArgument(argSrcLoc, Val)) {
             return true;
@@ -5109,6 +5106,79 @@ public:
     }
 
     return false;
+  }
+
+  bool IsHLSLMatrixTemplate(clang::TemplateDecl *Template) {
+    DXASSERT_NOMSG(Template != nullptr);
+
+    return Template->getCanonicalDecl() ==
+           m_matrixTemplateDecl->getCanonicalDecl();
+  }
+
+  /// <summary>Performs HLSL-specific processing of matrix
+  /// declarations.</summary>
+  QualType CheckHLSLMatrixTemplate(_In_ TemplateDecl *Template,
+                                   SourceLocation Loc /* TemplateLoc */,
+                                   TemplateArgumentListInfo &TemplateArgList) {
+    // Assume IsHLSLMatrixTemplate are
+    // true.
+    DXASSERT_NOMSG(IsHLSLMatrixTemplate(Template));
+
+    QualType EltType = m_sema->getASTContext().FloatTy;
+    SourceLocation EltLoc = NoLoc;
+    if (TemplateArgList.size() > 0) {
+      if (TemplateArgList[0].getArgument().getKind() !=
+          TemplateArgument::ArgKind::Type) {
+        m_sema->Diag(TemplateArgList[0].getLocation(), diag::err_attribute_invalid_matrix_type)
+            << TemplateArgList[0].getArgument();
+        return QualType();
+      }
+      EltType = TemplateArgList[0].getArgument().getAsType();
+      EltLoc = TemplateArgList[0].getLocation();
+    }
+
+    if (!EltType->isDependentType()) {
+      if (!IsValidTemplateArgumentType(EltLoc, EltType, true)) {
+        // NOTE: IsValidTemplateArgumentType emits its own diagnostics
+        return QualType();
+      }
+    }
+
+    ASTContext &Ctx = m_sema->getASTContext();
+    QualType I32Ty = Ctx.getIntTypeForBitwidth(32, 1);
+    auto getMatrixArgAsExpr = [&I32Ty, &Ctx](TemplateArgumentListInfo &TemplateArgList,
+                         unsigned Idx) -> Expr* {
+      if (TemplateArgList.size() <= Idx)
+        return IntegerLiteral::Create(Ctx, llvm::APInt(32, 4, true), I32Ty,
+                                             NoLoc);
+      const TemplateArgumentLoc &ArgLoc = TemplateArgList[Idx];
+      const TemplateArgument &Arg = ArgLoc.getArgument();
+      if (Arg.getKind() == TemplateArgument::ArgKind::Integral)
+        return IntegerLiteral::Create(Ctx,Arg.getAsIntegral(), I32Ty,
+                                      NoLoc);
+      Expr *expr = Arg.getAsExpr();
+      return expr;
+    };
+
+    Expr * RowExpr = getMatrixArgAsExpr(TemplateArgList, 1);
+    Expr * ColExpr = getMatrixArgAsExpr(TemplateArgList, 2);
+    Optional<llvm::APSInt> RowImm = RowExpr->getIntegerConstantExpr(Ctx);
+    Optional<llvm::APSInt> ColImm = ColExpr->getIntegerConstantExpr(Ctx);
+
+    if (RowImm.hasValue() && ColImm.hasValue()) {
+      if (CheckRangedTemplateArgument(RowExpr->getExprLoc(), RowImm.getValue()))
+        return QualType();
+      if (CheckRangedTemplateArgument(ColExpr->getExprLoc(), ColImm.getValue()))
+        return QualType();
+
+      return m_sema->getASTContext().getConstantMatrixType(
+          EltType, false, m_sema->getLangOpts().HLSLDefaultRowMajor,
+          RowImm->getExtValue(), ColImm->getExtValue());
+    }
+
+    return Ctx.getDependentSizedMatrixType(
+        EltType, false, m_sema->getLangOpts().HLSLDefaultRowMajor, RowExpr,
+        ColExpr, NoLoc);
   }
 
   FindStructBasicTypeResult FindStructBasicType(_In_ DeclContext* functionDeclContext);
@@ -6752,6 +6822,11 @@ void HLSLExternalSource::CollectInfo(QualType type, ArTypeInfo* pTypeInfo)
   pTypeInfo->ShapeKind = GetTypeObjectKind(type);
   GetRowsAndColsForAny(type, pTypeInfo->uRows, pTypeInfo->uCols);
   pTypeInfo->uTotalElts = pTypeInfo->uRows * pTypeInfo->uCols;
+  if (pTypeInfo->ShapeKind == AR_TOBJ_ARRAY)
+    pTypeInfo->ArrayEltTy =
+        GetArrayElementType(type)->getCanonicalTypeUnqualified()->getTypePtr();
+  else
+    pTypeInfo->ArrayEltTy = nullptr;
 }
 
 // Highest possible score (i.e., worst possible score).
@@ -8986,7 +9061,24 @@ bool HLSLExternalSource::CanConvert(
     {
       return false;
     }
+    // Matrix array cases
+    if (SourceInfo.ShapeKind == AR_TOBJ_ARRAY &&
+        TargetInfo.ShapeKind == AR_TOBJ_ARRAY) {
+      // default and explicit matrix should match.
+      if (SourceInfo.ArrayEltTy->isMatrixType() &&
+          TargetInfo.ArrayEltTy->isMatrixType()) {
+        ArTypeInfo TargetEltInfo, SourceEltInfo;
+        CollectInfo(QualType(TargetInfo.ArrayEltTy, 0), &TargetEltInfo);
+        CollectInfo(QualType(SourceInfo.ArrayEltTy, 0), &SourceEltInfo);
 
+        if (TargetEltInfo.EltTy == SourceEltInfo.EltTy &&
+            TargetEltInfo.uRows == SourceEltInfo.uRows &&
+            TargetEltInfo.uCols == SourceEltInfo.uCols) {
+          Remarks = TYPE_CONVERSION_IDENTICAL;
+          goto lSuccess;
+        }
+      }
+    }
     // Structure to structure cases
     const RecordType *targetRT = dyn_cast<RecordType>(target);
     const RecordType *sourceRT = dyn_cast<RecordType>(source);
@@ -10414,6 +10506,35 @@ bool hlsl::CheckTemplateArgumentListForHLSL(Sema& self, TemplateDecl* Template, 
 
   HLSLExternalSource* hlsl = reinterpret_cast<HLSLExternalSource*>(externalSource);
   return hlsl->CheckTemplateArgumentListForHLSL(Template, TemplateLoc, TemplateArgList);
+}
+
+bool hlsl::IsHLSLMatrixTemplate(clang::Sema &self, clang::TemplateDecl *Template) {
+  DXASSERT_NOMSG(Template != nullptr);
+
+  ExternalSemaSource *externalSource = self.getExternalSource();
+  if (externalSource == nullptr) {
+    return false;
+  }
+
+  HLSLExternalSource *hlsl =
+      reinterpret_cast<HLSLExternalSource *>(externalSource);
+  return hlsl->IsHLSLMatrixTemplate(Template);
+}
+
+clang::QualType hlsl::CheckHLSLMatrixTemplate(
+    clang::Sema &self, clang::TemplateDecl *Template,
+                        clang::SourceLocation TemplateLoc,
+                        clang::TemplateArgumentListInfo &TemplateArgList) {
+  DXASSERT_NOMSG(Template != nullptr);
+
+  ExternalSemaSource *externalSource = self.getExternalSource();
+  if (externalSource == nullptr) {
+    return QualType();
+  }
+
+  HLSLExternalSource *hlsl =
+      reinterpret_cast<HLSLExternalSource *>(externalSource);
+  return hlsl->CheckHLSLMatrixTemplate(Template, TemplateLoc, TemplateArgList);
 }
 
 /// <summary>Deduces template arguments on a function call in an HLSL program.</summary>
@@ -11871,6 +11992,11 @@ static Expr* ValidateClipPlaneArraySubscriptExpr(Sema& S, ArraySubscriptExpr* E)
     return nullptr;
   }
 
+  if (E->getBase()->getType()->isMatrixType()) {
+    S.Diag(E->getLocStart(),
+           diag::err_hlsl_unsupported_clipplane_argument_expression);
+    return nullptr;
+  }
   return E->getBase();
 }
 
@@ -13419,59 +13545,53 @@ static QualType getUnderlyingType(QualType Type)
 /// <param name="ppNorm">Set pointer to snorm/unorm AttributedType if supplied.</param>
 void hlsl::GetHLSLAttributedTypes(
     _In_ clang::Sema *self, clang::QualType type,
-    _Inout_opt_ const clang::AttributedType **ppMatrixOrientation,
-    _Inout_opt_ const clang::AttributedType **ppNorm,
-    _Inout_opt_ const clang::AttributedType **ppGLC) {
-  AssignOpt<const clang::AttributedType *>(nullptr, ppMatrixOrientation);
-  AssignOpt<const clang::AttributedType *>(nullptr, ppNorm);
-  AssignOpt<const clang::AttributedType *>(nullptr, ppGLC);
+    _Inout_opt_ llvm::Optional<AttributeList::Kind> &MatrixOrientation,
+    _Inout_opt_ llvm::Optional<AttributeList::Kind> &Norm,
+    _Inout_opt_ llvm::Optional<AttributeList::Kind> &GLC) {
 
   // Note: we clear output pointers once set so we can stop searching
   QualType Desugared = getUnderlyingType(type);
   const AttributedType *AT = dyn_cast<AttributedType>(Desugared);
-  while (AT && (ppMatrixOrientation || ppNorm || ppGLC)) {
+  while (AT) {
     AttributedType::Kind Kind = AT->getAttrKind();
-
-    if (Kind == AttributedType::attr_hlsl_row_major ||
-        Kind == AttributedType::attr_hlsl_column_major)
-    {
-      if (ppMatrixOrientation)
-      {
-        *ppMatrixOrientation = AT;
-        ppMatrixOrientation = nullptr;
-      }
-    }
-    else if (Kind == AttributedType::attr_hlsl_unorm ||
-             Kind == AttributedType::attr_hlsl_snorm)
-    {
-      if (ppNorm)
-      {
-        *ppNorm = AT;
-        ppNorm = nullptr;
-      }
-    }
-    else if (Kind == AttributedType::attr_hlsl_globallycoherent) {
-      if (ppGLC) {
-        *ppGLC = AT;
-        ppGLC = nullptr;
-      }
+    switch (Kind) {
+    case AttributedType::attr_hlsl_unorm:
+      Norm = AttributeList::Kind::AT_HLSLUnorm;
+      break;
+    case AttributedType::attr_hlsl_snorm:
+      Norm = AttributeList::Kind::AT_HLSLSnorm;
+      break;
+    case AttributedType::attr_hlsl_globallycoherent:
+      GLC = AttributeList::Kind::AT_HLSLGloballyCoherent;
+      break;
     }
 
     Desugared = getUnderlyingType(AT->getEquivalentType());
     AT = dyn_cast<AttributedType>(Desugared);
   }
 
+  if (Desugared->isMatrixType()) {
+    auto *MT = Desugared->getAs<MatrixType>();
+    if (MT->getIsExplicitOrientation()) {
+      MatrixOrientation = MT->getIsRowMajor()
+                              ? AttributeList::AT_HLSLRowMajor
+                              : AttributeList::AT_HLSLColumnMajor;
+    }
+  }
+
   // Unwrap component type on vector or matrix and check snorm/unorm
   Desugared = getUnderlyingType(hlsl::GetOriginalElementType(self, Desugared));
   AT = dyn_cast<AttributedType>(Desugared);
-  while (AT && ppNorm) {
+  while (AT) {
     AttributedType::Kind Kind = AT->getAttrKind();
 
-    if (Kind == AttributedType::attr_hlsl_unorm ||
-      Kind == AttributedType::attr_hlsl_snorm)
-    {
-      *ppNorm = AT;
-      ppNorm = nullptr;
+    switch (Kind) {
+    case AttributedType::attr_hlsl_unorm:
+      Norm = AttributeList::Kind::AT_HLSLUnorm;
+      break;
+    case AttributedType::attr_hlsl_snorm:
+      Norm = AttributeList::Kind::AT_HLSLSnorm;
+      break;
     }
 
     Desugared = getUnderlyingType(AT->getEquivalentType());
@@ -13505,6 +13625,9 @@ bool hlsl::IsVectorType(
 clang::QualType hlsl::GetOriginalMatrixOrVectorElementType(
   _In_ clang::QualType type)
 {
+  if (type->isMatrixType()) {
+    return type->getAs<MatrixType>()->getElementType();
+  }
   // TODO: Determine if this is really the best way to get the matrix/vector specialization
   // without losing the AttributedType on the template parameter
   if (const Type* Ty = type.getTypePtrOrNull()) {
@@ -14018,6 +14141,10 @@ void Sema::CheckHLSLArrayAccess(const Expr *expr) {
             if (object->getOperator() == OverloadedOperatorKind::OO_Subscript) {
               CheckHLSLArrayAccess(object);
             }
+          } else if (auto *ASE = dyn_cast<ArraySubscriptExpr>(
+                         OperatorCallExpr->getArg(0))) {
+            if (ASE->getBase()->getType()->isMatrixType())
+              this->CheckArrayAccess(ASE);
           }
           if (intIndex < 0 || (uint32_t)intIndex >= vectorSize) {
               Diag(RHS->getExprLoc(),
@@ -14055,4 +14182,13 @@ QualType Sema::getHLSLDefaultSpecialization(TemplateDecl *Decl) {
                                Decl->getSourceRange().getEnd(), EmptyArgs);
   }
   return QualType();
+}
+
+QualType hlsl::GetHLSLVectorType(clang::Sema &sema, QualType EltTy,
+                                 unsigned int NumElts) {
+  HLSLExternalSource *HLSLExtSrc = HLSLExternalSource::FromSema(&sema);
+  ArBasicKind TypeKind = HLSLExtSrc->GetTypeElementKind(EltTy);
+  UINT64 qwQual = EltTy.isConstQualified() ? AR_QUAL_CONST : 0;
+  return HLSLExtSrc->NewSimpleAggregateType(ArTypeObjectKind::AR_TOBJ_VECTOR,
+                                            TypeKind, qwQual, 1, NumElts);
 }

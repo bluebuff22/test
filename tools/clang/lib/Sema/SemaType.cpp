@@ -2216,6 +2216,82 @@ QualType Sema::BuildExtVectorType(QualType T, Expr *ArraySize,
   return Context.getDependentSizedExtVectorType(T, ArraySize, AttrLoc);
 }
 
+QualType Sema::BuildMatrixType(QualType ElementTy, bool IsExplicit,
+                               bool IsRowMajor, Expr *NumRows, Expr *NumCols,
+                               SourceLocation AttrLoc) {
+
+  // Check element type, if it is not dependent.
+  if (!ElementTy->isDependentType() &&
+      !MatrixType::isValidElementType(ElementTy)) {
+    Diag(AttrLoc, diag::err_attribute_invalid_matrix_type) << ElementTy;
+    return QualType();
+  }
+
+  if (NumRows->isTypeDependent() || NumCols->isTypeDependent() ||
+      NumRows->isValueDependent() || NumCols->isValueDependent())
+    return Context.getDependentSizedMatrixType(
+        ElementTy, IsExplicit, IsRowMajor, NumRows, NumCols, AttrLoc);
+
+  Optional<llvm::APSInt> ValueRows =
+      NumRows->getIntegerConstantExpr(Context);
+  Optional<llvm::APSInt> ValueColumns =
+      NumCols->getIntegerConstantExpr(Context);
+
+  auto const RowRange = NumRows->getSourceRange();
+  auto const ColRange = NumCols->getSourceRange();
+
+  // Both are row and column expressions are invalid.
+  if (!ValueRows && !ValueColumns) {
+    Diag(AttrLoc, diag::err_attribute_argument_type)
+        << "matrix_type" << AANT_ArgumentIntegerConstant << RowRange
+        << ColRange;
+    return QualType();
+  }
+
+  // Only the row expression is invalid.
+  if (!ValueRows) {
+    Diag(AttrLoc, diag::err_attribute_argument_type)
+        << "matrix_type" << AANT_ArgumentIntegerConstant << RowRange;
+    return QualType();
+  }
+
+  // Only the column expression is invalid.
+  if (!ValueColumns) {
+    Diag(AttrLoc, diag::err_attribute_argument_type)
+        << "matrix_type" << AANT_ArgumentIntegerConstant << ColRange;
+    return QualType();
+  }
+
+  // Check the matrix dimensions.
+  unsigned MatrixRows = static_cast<unsigned>(ValueRows->getZExtValue());
+  unsigned MatrixColumns = static_cast<unsigned>(ValueColumns->getZExtValue());
+  if (MatrixRows == 0 && MatrixColumns == 0) {
+    Diag(AttrLoc, diag::err_attribute_zero_size)
+        << "matrix" << RowRange << ColRange;
+    return QualType();
+  }
+  if (MatrixRows == 0) {
+    Diag(AttrLoc, diag::err_attribute_zero_size) << "matrix" << RowRange;
+    return QualType();
+  }
+  if (MatrixColumns == 0) {
+    Diag(AttrLoc, diag::err_attribute_zero_size) << "matrix" << ColRange;
+    return QualType();
+  }
+  if (!ConstantMatrixType::isDimensionValid(MatrixRows)) {
+    Diag(AttrLoc, diag::err_attribute_size_too_large)
+        << RowRange << "matrix row";
+    return QualType();
+  }
+  if (!ConstantMatrixType::isDimensionValid(MatrixColumns)) {
+    Diag(AttrLoc, diag::err_attribute_size_too_large)
+        << ColRange << "matrix column";
+    return QualType();
+  }
+  return Context.getConstantMatrixType(ElementTy, IsExplicit, IsRowMajor,
+                                       MatrixRows, MatrixColumns);
+}
+
 bool Sema::CheckFunctionReturnType(QualType T, SourceLocation Loc) {
   if (T->isArrayType() || T->isFunctionType()) {
     Diag(Loc, diag::err_func_returning_array_function)
@@ -4336,9 +4412,7 @@ TypeSourceInfo *Sema::GetTypeForDeclarator(Declarator &D, Scope *S) {
   bool defaultRowMajor;
   if (getLangOpts().HLSL && hlsl::IsHLSLMatType(T) && !hlsl::HasHLSLMatOrientation(T)
     && D.getDeclSpec().TryGetDefaultMatrixPackRowMajor(defaultRowMajor)) {
-    AttributedType::Kind AttributeKind = defaultRowMajor
-      ? AttributedType::attr_hlsl_row_major : AttributedType::attr_hlsl_column_major;
-    T = Context.getAttributedType(AttributeKind, T, T);
+    T = hlsl::ApplyOrientationOnHLSLMatrixType(T, defaultRowMajor, Context);
   }
   // HLSL changes end
 
@@ -5799,46 +5873,43 @@ static bool handleHLSLTypeAttr(TypeProcessingState &State,
     return true;
   }
 
-  const AttributedType *pMatrixOrientation = nullptr;
-  const AttributedType *pNorm = nullptr;
-  const AttributedType *pGLC = nullptr;
-  hlsl::GetHLSLAttributedTypes(&S, Type, &pMatrixOrientation, &pNorm, &pGLC);
+  llvm::Optional<AttributeList::Kind> MatrixOrientation;
+  llvm::Optional<AttributeList::Kind> Norm;
+  llvm::Optional<AttributeList::Kind> GLC;
 
-  if (pMatrixOrientation &&
-    (Kind == AttributeList::AT_HLSLColumnMajor ||
-    Kind == AttributeList::AT_HLSLRowMajor))
-  {
-    AttributedType::Kind CurAttrKind = pMatrixOrientation->getAttrKind();
-    if (Kind == getAttrListKind(CurAttrKind))
-    {
+  hlsl::GetHLSLAttributedTypes(&S, Type, MatrixOrientation, Norm, GLC);
+
+  if (MatrixOrientation && (Kind == AttributeList::AT_HLSLColumnMajor ||
+                            Kind == AttributeList::AT_HLSLRowMajor)) {
+    AttributeList::Kind CurAttrKind = MatrixOrientation.getValue();
+    if (Kind == CurAttrKind) {
       S.Diag(Attr.getLoc(), diag::warn_duplicate_attribute_exact)
-        << Attr.getName() << Attr.getRange();
+          << Attr.getName() << Attr.getRange();
     } else {
       S.Diag(Attr.getLoc(), diag::err_attributes_are_not_compatible)
-        << "'row_major'" << "'column_major'" << Attr.getRange();
+          << "'row_major'"
+          << "'column_major'" << Attr.getRange();
     }
     return true;
   }
 
-  if (pNorm &&
-    (Kind == AttributeList::AT_HLSLSnorm ||
-    Kind == AttributeList::AT_HLSLUnorm))
-  {
-    AttributedType::Kind CurAttrKind = pNorm->getAttrKind();
-    if (Kind == getAttrListKind(CurAttrKind))
-    {
+  if (Norm && (Kind == AttributeList::AT_HLSLSnorm ||
+               Kind == AttributeList::AT_HLSLUnorm)) {
+    AttributeList::Kind CurAttrKind = Norm.getValue();
+    if (Kind == CurAttrKind) {
       S.Diag(Attr.getLoc(), diag::warn_duplicate_attribute_exact)
-        << Attr.getName() << Attr.getRange();
+          << Attr.getName() << Attr.getRange();
     } else {
       S.Diag(Attr.getLoc(), diag::err_attributes_are_not_compatible)
-        << "'unorm'" << "'snorm'" << Attr.getRange();
+          << "'unorm'"
+          << "'snorm'" << Attr.getRange();
     }
     return true;
   }
 
-  if (pGLC && Kind == AttributeList::AT_HLSLGloballyCoherent) {
-    AttributedType::Kind CurAttrKind = pGLC->getAttrKind();
-    if (Kind == getAttrListKind(CurAttrKind)) {
+  if (GLC && Kind == AttributeList::AT_HLSLGloballyCoherent) {
+    AttributeList::Kind CurAttrKind = GLC.getValue();
+    if (Kind == CurAttrKind) {
       S.Diag(Attr.getLoc(), diag::warn_duplicate_attribute_exact)
           << Attr.getName() << Attr.getRange();
     }
@@ -5847,8 +5918,16 @@ static bool handleHLSLTypeAttr(TypeProcessingState &State,
   AttributedType::Kind TAK;
   switch (Kind) {
   default: llvm_unreachable("Unknown attribute kind");
-  case AttributeList::AT_HLSLRowMajor:    TAK = AttributedType::attr_hlsl_row_major; break;
-  case AttributeList::AT_HLSLColumnMajor: TAK = AttributedType::attr_hlsl_column_major; break;
+  case AttributeList::AT_HLSLRowMajor: {
+    Type = hlsl::ApplyOrientationOnHLSLMatrixType(Type, /*IsRowMajor*/ true,
+                                                  S.Context);
+    return false;
+  } break;
+  case AttributeList::AT_HLSLColumnMajor: {
+    Type = hlsl::ApplyOrientationOnHLSLMatrixType(Type, /*IsRowMajor*/ false,
+                                                  S.Context);
+    return false;
+  } break;
   case AttributeList::AT_HLSLUnorm:       TAK = AttributedType::attr_hlsl_unorm; break;
   case AttributeList::AT_HLSLSnorm:       TAK = AttributedType::attr_hlsl_snorm; break;
   case AttributeList::AT_HLSLGloballyCoherent:
