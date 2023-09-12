@@ -4213,7 +4213,7 @@ Sema::CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
   Expr *RHSExp = Idx;
 
   // Perform default conversions.
-  if (!LHSExp->getType()->getAs<VectorType>()) {
+  if (!LHSExp->getType()->getAs<VectorType>() && !LHSExp->getType()->isMatrixType()) {
     ExprResult Result = DefaultFunctionArrayLvalueConversion(LHSExp);
     if (Result.isInvalid())
       return ExprError();
@@ -4317,6 +4317,35 @@ Sema::CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
     BaseExpr = RHSExp;
     IndexExpr = LHSExp;
     ResultType = RHSTy->getAs<PointerType>()->getPointeeType();
+  // HLSL Change Begin - Matrix type.
+  } else if (LHSTy->isMatrixType()) {
+    BaseExpr = LHSExp;
+    IndexExpr = RHSExp;
+    // Make the idx unsigned to match old behavior of matrix subscript which use unsigned idx.
+    if (IndexExpr->getType()->isSignedIntegerType()) {
+      IndexExpr =
+          ImpCastExprToType(IndexExpr,
+                            getASTContext().getCorrespondingUnsignedType(
+                                IndexExpr->getType()),
+                            CK_IntegralCast)
+              .get();
+    }
+    VK = LHSExp->getValueKind();
+    if (auto *CMT = LHSTy->getAs<ConstantMatrixType>()) {
+      ResultType = hlsl::GetHLSLVectorType(*this, CMT->getElementType(),
+                                           CMT->getNumColumns());
+    } else {
+      auto *DMT = LHSTy->getAs<DependentSizedMatrixType>();
+      ResultType = getASTContext().getDependentSizedExtVectorType(
+          DMT->getElementType(), DMT->getColumnExpr(), SourceLocation());
+    }
+    // We need to make sure to preserve qualifiers on
+                              // array types, since these
+    // are in effect references.
+    if (LHSTy.hasQualifiers())
+      ResultType.setLocalFastQualifiers(
+          LHSTy.getQualifiers().getFastQualifiers());
+  // HLSL Change End
   } else {
     // HLSL Change: use HLSL variation of error message
     return ExprError(Diag(LLoc, getLangOpts().HLSL ? diag::err_hlsl_typecheck_subscript_value : diag::err_typecheck_subscript_value)
@@ -9391,6 +9420,12 @@ static void DiagnoseConstAssignment(Sema &S, const Expr *E,
       break;
     } // End MemberExpr
     break;
+  }
+
+  if (const ArraySubscriptExpr *ASE = dyn_cast<ArraySubscriptExpr>(E)) {
+    const Expr *Base = ASE->getBase();
+    if (Base->getType()->isMatrixType())
+      E = Base;
   }
 
   if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
