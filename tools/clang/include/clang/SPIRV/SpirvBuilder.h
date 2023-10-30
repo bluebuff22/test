@@ -96,6 +96,15 @@ public:
   SpirvVariable *addFnVar(QualType valueType, SourceLocation,
                           llvm::StringRef name = "", bool isPrecise = false,
                           SpirvInstruction *init = nullptr);
+  
+  /// \brief Creates a local variable of the given type in the current
+  /// function and returns it.
+  ///
+  /// The corresponding pointer type of the given type will be constructed in
+  /// this method for the variable itself.
+  SpirvVariable *addFnVar(const HybridType* valueType, SourceLocation,
+                          llvm::StringRef name = "", bool isPrecise = false,
+                          SpirvInstruction *init = nullptr);
 
   /// \brief Ends building of the current function. All basic blocks constructed
   /// from the beginning or after ending the previous function will be collected
@@ -750,6 +759,7 @@ public:
                        llvm::ArrayRef<SpirvConstant *> constituents,
                        bool specConst = false);
   SpirvConstant *getConstantNull(QualType);
+  SpirvConstant *getConstantNull(const SpirvType *);
 
   SpirvString *createString(llvm::StringRef str);
   SpirvString *getString(llvm::StringRef str);
