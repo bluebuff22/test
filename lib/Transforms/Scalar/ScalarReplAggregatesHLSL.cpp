@@ -1748,8 +1748,6 @@ bool SROAGlobalAndAllocas(HLModule &HLM, bool bHasDbgInfo) {
 
   DenseMap<GlobalVariable *, GVDbgOffset> GVDbgOffsetMap;
   for (GlobalVariable &GV : M.globals()) {
-    if (GV.user_empty())
-      continue;
     if (dxilutil::IsStaticGlobal(&GV) || dxilutil::IsSharedMemoryGlobal(&GV)) {
       staticGVs.insert(&GV);
       GVDbgOffset &dbgOffset = GVDbgOffsetMap[&GV];
